@@ -126,8 +126,7 @@ jobs:
               f"{BASE_URL}/fixtures",
               headers=HEADERS,
               params={
-                  "from": date_from,
-                  "to": date_to
+                  "date": "2026-09-24",   
               },
               timeout=30
           )
