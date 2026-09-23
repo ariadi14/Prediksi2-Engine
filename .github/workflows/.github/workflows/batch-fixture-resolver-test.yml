@@ -1,1 +1,481 @@
+name: Batch Fixture Resolver Test
 
+on:
+  workflow_dispatch:
+
+jobs:
+  batch-resolve:
+    runs-on: ubuntu-latest
+
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Batch Resolve Screenshot Fixtures
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+          import requests
+
+          BASE = "https://v3.football.api-sports.io"
+          KEY = os.environ.get("API_FOOTBALL_KEY")
+
+          if not KEY:
+              print("ERROR: API_FOOTBALL_KEY tidak ditemukan")
+              sys.exit(1)
+
+          HEADERS = {
+              "x-apisports-key": KEY
+          }
+
+          # ============================================================
+          # FIXTURE DARI 5 SCREENSHOT PELANGIEURO
+          # ============================================================
+
+          FIXTURES = [
+              ("Azerbaijan", "Tajikistan"),
+              ("Gibraltar", "Sao Tome and Principe"),
+              ("Iraq", "Oman"),
+              ("Saudi Arabia", "Kuwait"),
+              ("Italy U20", "Spain U20"),
+              ("North Korea U20", "Colombia U20"),
+              ("Al Jazira Al Hamra", "Forte Virtus FC"),
+              ("Hamilton Academical", "Cowdenbeath"),
+              ("SK Kladno", "Banik Ostrava"),
+              ("Gorud IL", "Moss"),
+              ("UE Sant Andreu", "Real Madrid Castilla"),
+              ("Boreham Wood", "Everton U21"),
+              ("Atletico Saguntino", "CDA Navalcarnero"),
+              ("Guisborough Town", "Ashington"),
+              ("Lower Breck", "Atherton Collieries"),
+              ("Shifnal Town", "Nantwich Town"),
+              ("Maccabi London FC", "Biggleswade"),
+              ("Oud-Heverlee Leuven", "AS Roma"),
+              ("Servette Chenois", "Olympique Lyonnais"),
+              ("PAOK", "Spartak Myjava"),
+              ("Slovan Liberec", "Rosenborg"),
+              ("HJK Helsinki", "Brann"),
+              ("Brondby IF", "Sporting Lisbon"),
+              ("Tottenham Hotspur", "West Ham United"),
+              ("Crystal Palace", "Watford"),
+              ("Nottingham Forest", "Aston Villa"),
+              ("Manchester United", "Sheffield United"),
+              ("Liverpool", "Sunderland"),
+              ("Everton", "Birmingham City"),
+              ("Seattle Sounders", "Real Salt Lake"),
+              ("America de Cali", "Aguilas Doradas"),
+              ("Curico Unido", "Deportes Concepcion"),
+              ("Deportes Iquique", "Antofagasta"),
+              ("Union La Calera", "CD Universidad Catolica"),
+              ("AD Tarma", "Cienciano"),
+              ("Turks and Caicos Islands", "Montserrat"),
+          ]
+
+          def norm(name):
+              name = (name or "").lower()
+
+              name = re.sub(
+                  r"\[[^\]]*\]",
+                  "",
+                  name
+              )
+
+              name = re.sub(
+                  r"[^a-z0-9]+",
+                  "",
+                  name
+              )
+
+              return name
+
+          print("========================================")
+          print("PREDIKSI 2")
+          print("BATCH FIXTURE RESOLVER TEST")
+          print("========================================")
+
+          print(
+              "TOTAL FIXTURE SCREENSHOT:",
+              len(FIXTURES)
+          )
+
+          # ============================================================
+          # AMBIL FIXTURE 23 SEPTEMBER
+          # ============================================================
+
+          all_fixtures = []
+
+          for date in [
+              "2026-09-23",
+              "2026-09-24"
+          ]:
+
+              print("----------------------------------------")
+              print("QUERY DATE:", date)
+
+              response = requests.get(
+                  f"{BASE}/fixtures",
+                  headers=HEADERS,
+                  params={
+                      "date": date
+                  },
+                  timeout=30
+              )
+
+              print(
+                  "HTTP:",
+                  response.status_code
+              )
+
+              if response.status_code != 200:
+                  print(response.text)
+                  sys.exit(1)
+
+              data = response.json()
+
+              print(
+                  "API ERRORS:",
+                  data.get("errors")
+              )
+
+              rows = data.get(
+                  "response",
+                  []
+              )
+
+              print(
+                  "FIXTURES:",
+                  len(rows)
+              )
+
+              all_fixtures.extend(rows)
+
+          # ============================================================
+          # DEDUP FIXTURE API
+          # ============================================================
+
+          unique = {}
+
+          for item in all_fixtures:
+
+              fixture_id = (
+                  item
+                  .get("fixture", {})
+                  .get("id")
+              )
+
+              if fixture_id:
+                  unique[fixture_id] = item
+
+          api_fixtures = list(
+              unique.values()
+          )
+
+          print("----------------------------------------")
+          print(
+              "UNIQUE API FIXTURES:",
+              len(api_fixtures)
+          )
+
+          # ============================================================
+          # RESOLUTION
+          # ============================================================
+
+          resolved = []
+          not_found = []
+
+          for home, away in FIXTURES:
+
+              target_home = norm(home)
+              target_away = norm(away)
+
+              found = None
+
+              for item in api_fixtures:
+
+                  teams = item.get(
+                      "teams",
+                      {}
+                  )
+
+                  api_home = norm(
+                      teams
+                      .get("home", {})
+                      .get("name")
+                  )
+
+                  api_away = norm(
+                      teams
+                      .get("away", {})
+                      .get("name")
+                  )
+
+                  if (
+                      api_home == target_home
+                      and
+                      api_away == target_away
+                  ):
+                      found = item
+                      break
+
+              if found:
+
+                  fixture = found.get(
+                      "fixture",
+                      {}
+                  )
+
+                  league = found.get(
+                      "league",
+                      {}
+                  )
+
+                  fixture_id = fixture.get(
+                      "id"
+                  )
+
+                  date = fixture.get(
+                      "date"
+                  )
+
+                  print(
+                      "RESOLVED:",
+                      home,
+                      "vs",
+                      away,
+                      "| ID:",
+                      fixture_id,
+                      "|",
+                      league.get("name"),
+                      "|",
+                      date
+                  )
+
+                  resolved.append(found)
+
+              else:
+
+                  print(
+                      "NOT FOUND:",
+                      home,
+                      "vs",
+                      away
+                  )
+
+                  not_found.append(
+                      (home, away)
+                  )
+
+          # ============================================================
+          # HASIL RESOLUTION
+          # ============================================================
+
+          print("========================================")
+          print("RESOLUTION RESULT")
+          print("========================================")
+
+          print(
+              "SCREENSHOT FIXTURES:",
+              len(FIXTURES)
+          )
+
+          print(
+              "RESOLVED:",
+              len(resolved)
+          )
+
+          print(
+              "NOT FOUND:",
+              len(not_found)
+          )
+
+          # ============================================================
+          # EVIDENCE TEST
+          # Maksimal 8 fixture untuk menghemat quota API.
+          # ============================================================
+
+          evidence_pass = 0
+
+          print("========================================")
+          print("EVIDENCE TEST")
+          print("========================================")
+
+          test_items = resolved[:8]
+
+          print(
+              "FIXTURES TESTED:",
+              len(test_items)
+          )
+
+          for item in test_items:
+
+              fixture = item.get(
+                  "fixture",
+                  {}
+              )
+
+              teams = item.get(
+                  "teams",
+                  {}
+              )
+
+              fixture_id = fixture.get(
+                  "id"
+              )
+
+              home_team = teams.get(
+                  "home",
+                  {}
+              )
+
+              away_team = teams.get(
+                  "away",
+                  {}
+              )
+
+              home_id = home_team.get(
+                  "id"
+              )
+
+              away_id = away_team.get(
+                  "id"
+              )
+
+              match_name = (
+                  home_team.get("name")
+                  + " vs "
+                  + away_team.get("name")
+              )
+
+              stats = requests.get(
+                  f"{BASE}/fixtures/statistics",
+                  headers=HEADERS,
+                  params={
+                      "fixture": fixture_id
+                  },
+                  timeout=30
+              )
+
+              lineups = requests.get(
+                  f"{BASE}/fixtures/lineups",
+                  headers=HEADERS,
+                  params={
+                      "fixture": fixture_id
+                  },
+                  timeout=30
+              )
+
+              h2h = requests.get(
+                  f"{BASE}/fixtures/headtohead",
+                  headers=HEADERS,
+                  params={
+                      "h2h":
+                      f"{home_id}-{away_id}"
+                  },
+                  timeout=30
+              )
+
+              stats_ok = (
+                  stats.status_code == 200
+              )
+
+              lineups_ok = (
+                  lineups.status_code == 200
+              )
+
+              h2h_ok = (
+                  h2h.status_code == 200
+              )
+
+              passed = (
+                  stats_ok
+                  and
+                  lineups_ok
+                  and
+                  h2h_ok
+              )
+
+              print(
+                  "EVIDENCE:",
+                  match_name
+              )
+
+              print(
+                  "  Fixture ID:",
+                  fixture_id
+              )
+
+              print(
+                  "  Statistics:",
+                  stats.status_code
+              )
+
+              print(
+                  "  Lineups:",
+                  lineups.status_code
+              )
+
+              print(
+                  "  H2H:",
+                  h2h.status_code
+              )
+
+              print(
+                  "  RESULT:",
+                  "PASS" if passed
+                  else "PARTIAL/FAIL"
+              )
+
+              if passed:
+                  evidence_pass += 1
+
+          # ============================================================
+          # FINAL
+          # ============================================================
+
+          print("========================================")
+          print("BATCH TEST COMPLETE")
+          print("========================================")
+
+          print(
+              "TOTAL SCREENSHOT:",
+              len(FIXTURES)
+          )
+
+          print(
+              "RESOLVED:",
+              len(resolved)
+          )
+
+          print(
+              "NOT FOUND:",
+              len(not_found)
+          )
+
+          print(
+              "EVIDENCE PASS:",
+              evidence_pass
+          )
+
+          print("========================================")
+
+          if len(resolved) == 0:
+              print(
+                  "BATCH RESOLUTION: FAILED"
+              )
+              sys.exit(1)
+
+          print(
+              "BATCH RESOLUTION: PASS"
+          )
+
+          PY
