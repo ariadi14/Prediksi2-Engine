@@ -88,7 +88,7 @@ jobs:
               "https://v3.football.api-sports.io/fixtures",
               headers=HEADERS,
               params={
-                  "team": home_id,
+                  "team": "2026-09-24",
                   "league": 253,
                   "season": 2026
 
