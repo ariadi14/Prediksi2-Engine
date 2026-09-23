@@ -1,0 +1,77 @@
+name: API Football Fixtures Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-fixtures:
+    runs-on: ubuntu-latest
+
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Get real fixtures
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          key = os.environ.get("API_FOOTBALL_KEY")
+
+          url = "https://v3.football.api-sports.io/fixtures"
+
+          response = requests.get(
+              url,
+              headers={
+                  "x-apisports-key": key
+              },
+              params={
+                  "next": 5
+              },
+              timeout=30
+          )
+
+          print("HTTP STATUS:", response.status_code)
+
+          data = response.json()
+
+          if response.status_code != 200:
+              print("ERROR:", data.get("errors"))
+              raise SystemExit(1)
+
+          fixtures = data.get("response", [])
+
+          print("FIXTURES FOUND:", len(fixtures))
+
+          for item in fixtures:
+              fixture = item.get("fixture", {})
+              teams = item.get("teams", {})
+              league = item.get("league", {})
+
+              print("--------------------------------")
+              print("Fixture ID:", fixture.get("id"))
+              print("Tanggal:", fixture.get("date"))
+              print("Liga:", league.get("name"))
+              print(
+                  "Pertandingan:",
+                  teams.get("home", {}).get("name"),
+                  "vs",
+                  teams.get("away", {}).get("name")
+              )
+
+          if not fixtures:
+              print("Tidak ada fixture yang dikembalikan.")
+              raise SystemExit(1)
+
+          print("--------------------------------")
+          print("API-FOOTBALL FIXTURE TEST: PASS")
+          PY
