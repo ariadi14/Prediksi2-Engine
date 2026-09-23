@@ -21,17 +21,30 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Setup Tesseract OCR
         run: |
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr
 
+      - name: Extract V20.78.50 engine
+        run: |
+          unzip -o Prediksi2_Engine_V20_78_50_FINAL_VALIDATION_CANDIDATE.zip \
+            -d engine
+
+          echo "=== ENGINE CONTENT ==="
+          ls -lah engine
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest pandas Pillow pytesseract rapidfuzz
+          python -m pip install \
+            pytest \
+            pandas \
+            Pillow \
+            pytesseract \
+            rapidfuzz
 
       - name: Show environment
         run: |
@@ -40,13 +53,11 @@ jobs:
           pytest --version
           tesseract --version
 
-      - name: Check V20.78.50 files
+      - name: Verify V20.78.50 files
+        working-directory: engine
         run: |
-          echo "=== Repository ==="
-          ls -lah
+          echo "=== CHECK V20.78.50 ==="
 
-          echo
-          echo "=== V20.78.50 ==="
           test -f v20_78_45_historical_validation.py
           test -f v20_78_46_batch_validation.py
           test -f v20_78_47_stress_test.py
@@ -58,14 +69,17 @@ jobs:
           echo "Semua file V20.78.50 ditemukan."
 
       - name: Run V20.78.45 - V20.78.50 validation
+        working-directory: engine
         run: |
           pytest -q test_v20_78_45_to_50.py
 
       - name: Run complete test suite
+        working-directory: engine
         run: |
           pytest -q
 
       - name: Run production gate
+        working-directory: engine
         run: |
           python - <<'PY'
           from v20_78_50_production_gate import gate
@@ -90,6 +104,18 @@ jobs:
 
           if result["status"] != "NOT_READY":
               raise SystemExit(
-                  "Production gate berada pada status yang tidak diharapkan."
+                  "Unexpected production gate status."
               )
           PY
+
+      - name: Upload validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prediksi2-v20.78.50-validation
+          path: |
+            engine/*.json
+            engine/*.txt
+            engine/*.log
+          if-no-files-found: ignore
+          retention-days: 14
