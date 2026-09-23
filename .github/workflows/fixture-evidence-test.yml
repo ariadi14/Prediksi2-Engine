@@ -91,7 +91,7 @@ jobs:
                   "team": home_id,
                   "league": 253,
                   "season": 2026
-},
+
               },
               timeout=30
           )
