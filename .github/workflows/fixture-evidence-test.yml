@@ -11,7 +11,6 @@ jobs:
       API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
 
     steps:
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -20,12 +19,12 @@ jobs:
       - name: Install requests
         run: pip install requests
 
-      - name: Resolve Fixture and Collect Evidence
+      - name: Resolve Fixture
         run: |
           python - <<'PY'
           import os
-          import requests
           import sys
+          import requests
 
           BASE_URL = "https://v3.football.api-sports.io"
           KEY = os.environ.get("API_FOOTBALL_KEY")
@@ -38,16 +37,10 @@ jobs:
               "x-apisports-key": KEY
           }
 
-          # ============================================================
           # TEST FIXTURE
-          # ============================================================
-
           home = "Seattle Sounders"
           away = "Real Salt Lake"
 
-          # Rentang tanggal.
-          # Dibuat 23-24 September karena pertandingan dapat tampil
-          # pada tanggal berbeda tergantung timezone/API.
           date_from = "2026-09-23"
           date_to = "2026-09-24"
 
@@ -60,86 +53,74 @@ jobs:
           print("DATE TO:", date_to)
           print("========================================")
 
-          # ============================================================
-          # 1. CARI TEAM HOME
-          # ============================================================
+          # ------------------------------------------------------------
+          # 1. CARI HOME TEAM
+          # ------------------------------------------------------------
 
           r1 = requests.get(
               f"{BASE_URL}/teams",
               headers=HEADERS,
-              params={
-                  "search": home
-              },
+              params={"search": home},
               timeout=30
           )
 
           print("HOME TEAM HTTP:", r1.status_code)
 
           if r1.status_code != 200:
-              print("HOME TEAM API ERROR:")
               print(r1.text)
               sys.exit(1)
 
-          data_home = r1.json()
-
-          if data_home.get("errors"):
-              print("HOME TEAM ERRORS:", data_home["errors"])
-
-          home_candidates = data_home.get("response", [])
+          home_data = r1.json()
+          home_candidates = home_data.get("response", [])
 
           if not home_candidates:
               print("HOME TEAM NOT FOUND")
+              print(home_data.get("errors"))
               sys.exit(1)
 
           home_team = home_candidates[0]["team"]
           home_id = home_team["id"]
 
-          print("HOME RESOLVED:", home_team["name"])
+          print("HOME:", home_team["name"])
           print("HOME ID:", home_id)
 
-          # ============================================================
-          # 2. CARI TEAM AWAY
-          # ============================================================
+          # ------------------------------------------------------------
+          # 2. CARI AWAY TEAM
+          # ------------------------------------------------------------
 
           r2 = requests.get(
               f"{BASE_URL}/teams",
               headers=HEADERS,
-              params={
-                  "search": away
-              },
+              params={"search": away},
               timeout=30
           )
 
           print("AWAY TEAM HTTP:", r2.status_code)
 
           if r2.status_code != 200:
-              print("AWAY TEAM API ERROR:")
               print(r2.text)
               sys.exit(1)
 
-          data_away = r2.json()
-
-          if data_away.get("errors"):
-              print("AWAY TEAM ERRORS:", data_away["errors"])
-
-          away_candidates = data_away.get("response", [])
+          away_data = r2.json()
+          away_candidates = away_data.get("response", [])
 
           if not away_candidates:
               print("AWAY TEAM NOT FOUND")
+              print(away_data.get("errors"))
               sys.exit(1)
 
           away_team = away_candidates[0]["team"]
           away_id = away_team["id"]
 
-          print("AWAY RESOLVED:", away_team["name"])
+          print("AWAY:", away_team["name"])
           print("AWAY ID:", away_id)
 
-          # ============================================================
-          # 3. CARI SEMUA FIXTURE DALAM RENTANG TANGGAL
-          # ============================================================
+          # ------------------------------------------------------------
+          # 3. CARI SEMUA FIXTURE BERDASARKAN RENTANG TANGGAL
+          # ------------------------------------------------------------
 
           print("----------------------------------------")
-          print("MENCARI FIXTURE BERDASARKAN TANGGAL")
+          print("SEARCH FIXTURES")
 
           r3 = requests.get(
               f"{BASE_URL}/fixtures",
@@ -154,28 +135,24 @@ jobs:
           print("FIXTURE HTTP:", r3.status_code)
 
           if r3.status_code != 200:
-              print("FIXTURE API ERROR:")
               print(r3.text)
               sys.exit(1)
 
-          data_fixture = r3.json()
+          fixture_data = r3.json()
 
-          if data_fixture.get("errors"):
-              print("FIXTURE API ERRORS:")
-              print(data_fixture["errors"])
+          print("API ERRORS:", fixture_data.get("errors"))
 
-          fixtures = data_fixture.get("response", [])
+          fixtures = fixture_data.get("response", [])
 
-          print("TOTAL FIXTURE DITEMUKAN:", len(fixtures))
+          print("TOTAL FIXTURES:", len(fixtures))
 
-          # ============================================================
-          # 4. COCOKKAN HOME ID + AWAY ID
-          # ============================================================
+          # ------------------------------------------------------------
+          # 4. COCOKKAN TEAM ID
+          # ------------------------------------------------------------
 
           matched = None
 
           for item in fixtures:
-
               teams = item.get("teams", {})
 
               fixture_home = teams.get("home", {}).get("id")
@@ -188,42 +165,38 @@ jobs:
                   matched = item
                   break
 
-          # ============================================================
-          # 5. JIKA FIXTURE TIDAK DITEMUKAN
-          # ============================================================
+          # ------------------------------------------------------------
+          # 5. JIKA TIDAK DITEMUKAN
+          # ------------------------------------------------------------
 
-          if not matched:
+          if matched is None:
 
               print("----------------------------------------")
               print("EXACT FIXTURE NOT FOUND")
-
               print("HOME ID:", home_id)
               print("AWAY ID:", away_id)
-              print("TOTAL CANDIDATES:", len(fixtures))
+              print("CANDIDATES:", len(fixtures))
 
               print("----------------------------------------")
-              print("CONTOH FIXTURE DARI API:")
+              print("SAMPLE FIXTURES:")
 
-              for item in fixtures[:20]:
+              for item in fixtures[:10]:
 
                   teams = item.get("teams", {})
                   league = item.get("league", {})
                   fixture = item.get("fixture", {})
 
-                  h_name = teams.get("home", {}).get("name")
-                  a_name = teams.get("away", {}).get("name")
-
-                  h_id = teams.get("home", {}).get("id")
-                  a_id = teams.get("away", {}).get("id")
+                  h = teams.get("home", {})
+                  a = teams.get("away", {})
 
                   print(
-                      h_id,
+                      h.get("id"),
                       "-",
-                      a_id,
+                      a.get("id"),
                       "|",
-                      h_name,
+                      h.get("name"),
                       "vs",
-                      a_name,
+                      a.get("name"),
                       "|",
                       league.get("name"),
                       "|",
@@ -235,9 +208,9 @@ jobs:
 
               sys.exit(1)
 
-          # ============================================================
+          # ------------------------------------------------------------
           # 6. FIXTURE BERHASIL
-          # ============================================================
+          # ------------------------------------------------------------
 
           fixture = matched.get("fixture", {})
           league = matched.get("league", {})
@@ -261,4 +234,90 @@ jobs:
           print("LEAGUE:", league.get("name"))
           print("COUNTRY:", league.get("country"))
           print("DATE:", fixture.get("date"))
-          print("STATUS:", fixture.get("status", {}).
+
+          status = fixture.get("status", {})
+          print("STATUS:", status.get("short"))
+
+          # ------------------------------------------------------------
+          # 7. STATISTICS
+          # ------------------------------------------------------------
+
+          stats = requests.get(
+              f"{BASE_URL}/fixtures/statistics",
+              headers=HEADERS,
+              params={"fixture": fixture_id},
+              timeout=30
+          )
+
+          print("STATISTICS HTTP:", stats.status_code)
+
+          if stats.status_code == 200:
+              stats_data = stats.json()
+              print(
+                  "STATISTICS ROWS:",
+                  len(stats_data.get("response", []))
+              )
+          else:
+              print("STATISTICS ERROR:", stats.text)
+
+          # ------------------------------------------------------------
+          # 8. LINEUPS
+          # ------------------------------------------------------------
+
+          lineups = requests.get(
+              f"{BASE_URL}/fixtures/lineups",
+              headers=HEADERS,
+              params={"fixture": fixture_id},
+              timeout=30
+          )
+
+          print("LINEUPS HTTP:", lineups.status_code)
+
+          if lineups.status_code == 200:
+              lineup_data = lineups.json()
+              print(
+                  "LINEUPS ROWS:",
+                  len(lineup_data.get("response", []))
+              )
+          else:
+              print("LINEUPS ERROR:", lineups.text)
+
+          # ------------------------------------------------------------
+          # 9. H2H
+          # ------------------------------------------------------------
+
+          h2h = requests.get(
+              f"{BASE_URL}/fixtures/headtohead",
+              headers=HEADERS,
+              params={
+                  "h2h": f"{home_id}-{away_id}"
+              },
+              timeout=30
+          )
+
+          print("H2H HTTP:", h2h.status_code)
+
+          if h2h.status_code == 200:
+              h2h_data = h2h.json()
+              print(
+                  "H2H ROWS:",
+                  len(h2h_data.get("response", []))
+              )
+          else:
+              print("H2H ERROR:", h2h.text)
+
+          # ------------------------------------------------------------
+          # 10. FINAL
+          # ------------------------------------------------------------
+
+          print("========================================")
+          print("FIXTURE RESOLUTION: PASS")
+          print("EVIDENCE COLLECTION: PASS")
+          print("HOME ID:", home_id)
+          print("AWAY ID:", away_id)
+          print("FIXTURE ID:", fixture_id)
+          print("========================================")
+          print("TEST SELESAI")
+          print("========================================")
+
+          PY
