@@ -89,8 +89,9 @@ jobs:
               headers=HEADERS,
               params={
                   "team": home_id,
-                  "league": 253
+                  "league": 253,
                   "season": 2026
+},
               },
               timeout=30
           )
