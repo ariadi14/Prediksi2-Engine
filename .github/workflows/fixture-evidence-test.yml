@@ -11,6 +11,7 @@ jobs:
       API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
 
     steps:
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -19,150 +20,245 @@ jobs:
       - name: Install requests
         run: pip install requests
 
-      - name: Resolve and collect evidence
+      - name: Resolve Fixture and Collect Evidence
         run: |
           python - <<'PY'
           import os
           import requests
+          import sys
 
-          KEY = os.environ["API_FOOTBALL_KEY"]
+          BASE_URL = "https://v3.football.api-sports.io"
+          KEY = os.environ.get("API_FOOTBALL_KEY")
+
+          if not KEY:
+              print("ERROR: API_FOOTBALL_KEY tidak ditemukan")
+              sys.exit(1)
 
           HEADERS = {
               "x-apisports-key": KEY
           }
 
-          # Contoh fixture yang akan dicari.
-          # Nanti diganti otomatis dengan fixture dari parser PelangiEuro.
+          # ============================================================
+          # TEST FIXTURE
+          # ============================================================
+
           home = "Seattle Sounders"
           away = "Real Salt Lake"
 
+          # Rentang tanggal.
+          # Dibuat 23-24 September karena pertandingan dapat tampil
+          # pada tanggal berbeda tergantung timezone/API.
+          date_from = "2026-09-23"
+          date_to = "2026-09-24"
+
+          print("========================================")
+          print("PREDIKSI 2 - FIXTURE RESOLVER TEST")
+          print("========================================")
           print("HOME:", home)
           print("AWAY:", away)
+          print("DATE FROM:", date_from)
+          print("DATE TO:", date_to)
+          print("========================================")
 
-          # 1. Cari tim HOME
+          # ============================================================
+          # 1. CARI TEAM HOME
+          # ============================================================
+
           r1 = requests.get(
-              "https://v3.football.api-sports.io/teams",
+              f"{BASE_URL}/teams",
               headers=HEADERS,
-              params={"search": home},
+              params={
+                  "search": home
+              },
               timeout=30
           )
 
           print("HOME TEAM HTTP:", r1.status_code)
 
-          home_data = r1.json().get("response", [])
+          if r1.status_code != 200:
+              print("HOME TEAM API ERROR:")
+              print(r1.text)
+              sys.exit(1)
 
-          # 2. Cari tim AWAY
+          data_home = r1.json()
+
+          if data_home.get("errors"):
+              print("HOME TEAM ERRORS:", data_home["errors"])
+
+          home_candidates = data_home.get("response", [])
+
+          if not home_candidates:
+              print("HOME TEAM NOT FOUND")
+              sys.exit(1)
+
+          home_team = home_candidates[0]["team"]
+          home_id = home_team["id"]
+
+          print("HOME RESOLVED:", home_team["name"])
+          print("HOME ID:", home_id)
+
+          # ============================================================
+          # 2. CARI TEAM AWAY
+          # ============================================================
+
           r2 = requests.get(
-              "https://v3.football.api-sports.io/teams",
+              f"{BASE_URL}/teams",
               headers=HEADERS,
-              params={"search": away},
+              params={
+                  "search": away
+              },
               timeout=30
           )
 
           print("AWAY TEAM HTTP:", r2.status_code)
 
-          away_data = r2.json().get("response", [])
+          if r2.status_code != 200:
+              print("AWAY TEAM API ERROR:")
+              print(r2.text)
+              sys.exit(1)
 
-          if not home_data:
-              print("HOME TEAM NOT FOUND")
-              raise SystemExit(1)
+          data_away = r2.json()
 
-          if not away_data:
+          if data_away.get("errors"):
+              print("AWAY TEAM ERRORS:", data_away["errors"])
+
+          away_candidates = data_away.get("response", [])
+
+          if not away_candidates:
               print("AWAY TEAM NOT FOUND")
-              raise SystemExit(1)
+              sys.exit(1)
 
-          home_team = home_data[0]["team"]
-          away_team = away_data[0]["team"]
-
-          home_id = home_team["id"]
+          away_team = away_candidates[0]["team"]
           away_id = away_team["id"]
 
-          print("--------------------------------")
-          print("HOME:", home_team["name"])
-          print("HOME ID:", home_id)
-          print("AWAY:", away_team["name"])
+          print("AWAY RESOLVED:", away_team["name"])
           print("AWAY ID:", away_id)
 
-          # 3. Cari fixture berdasarkan kedua Team ID
+          # ============================================================
+          # 3. CARI SEMUA FIXTURE DALAM RENTANG TANGGAL
+          # ============================================================
+
+          print("----------------------------------------")
+          print("MENCARI FIXTURE BERDASARKAN TANGGAL")
+
           r3 = requests.get(
-              "https://v3.football.api-sports.io/fixtures",
+              f"{BASE_URL}/fixtures",
               headers=HEADERS,
               params={
-                  "date": "2026-09-24",
-                  "league": 253,
-                  "season": 2026
-
+                  "from": date_from,
+                  "to": date_to
               },
               timeout=30
           )
 
           print("FIXTURE HTTP:", r3.status_code)
 
-          fixtures = r3.json().get("response", [])
+          if r3.status_code != 200:
+              print("FIXTURE API ERROR:")
+              print(r3.text)
+              sys.exit(1)
+
+          data_fixture = r3.json()
+
+          if data_fixture.get("errors"):
+              print("FIXTURE API ERRORS:")
+              print(data_fixture["errors"])
+
+          fixtures = data_fixture.get("response", [])
+
+          print("TOTAL FIXTURE DITEMUKAN:", len(fixtures))
+
+          # ============================================================
+          # 4. COCOKKAN HOME ID + AWAY ID
+          # ============================================================
 
           matched = None
 
           for item in fixtures:
-              teams = item.get("teams", {})
-              h = teams.get("home", {}).get("id")
-              a = teams.get("away", {}).get("id")
 
-              if h == home_id and a == away_id:
+              teams = item.get("teams", {})
+
+              fixture_home = teams.get("home", {}).get("id")
+              fixture_away = teams.get("away", {}).get("id")
+
+              if (
+                  fixture_home == home_id
+                  and fixture_away == away_id
+              ):
                   matched = item
                   break
 
+          # ============================================================
+          # 5. JIKA FIXTURE TIDAK DITEMUKAN
+          # ============================================================
+
           if not matched:
+
+              print("----------------------------------------")
               print("EXACT FIXTURE NOT FOUND")
-              print("Fixture candidates:", len(fixtures))
-              raise SystemExit(1)
 
-          fixture = matched["fixture"]
-          league = matched["league"]
+              print("HOME ID:", home_id)
+              print("AWAY ID:", away_id)
+              print("TOTAL CANDIDATES:", len(fixtures))
 
-          fixture_id = fixture["id"]
+              print("----------------------------------------")
+              print("CONTOH FIXTURE DARI API:")
 
-          print("--------------------------------")
-          print("FIXTURE ID:", fixture_id)
-          print("LEAGUE:", league.get("name"))
-          print("DATE:", fixture.get("date"))
-          print("STATUS:", fixture.get("status", {}).get("short"))
+              for item in fixtures[:20]:
 
-          # 4. Ambil statistik fixture
-          stats = requests.get(
-              "https://v3.football.api-sports.io/fixtures/statistics",
-              headers=HEADERS,
-              params={"fixture": fixture_id},
-              timeout=30
-          )
+                  teams = item.get("teams", {})
+                  league = item.get("league", {})
+                  fixture = item.get("fixture", {})
 
-          print("STATISTICS HTTP:", stats.status_code)
+                  h_name = teams.get("home", {}).get("name")
+                  a_name = teams.get("away", {}).get("name")
 
-          # 5. Ambil lineups
-          lineups = requests.get(
-              "https://v3.football.api-sports.io/fixtures/lineups",
-              headers=HEADERS,
-              params={"fixture": fixture_id},
-              timeout=30
-          )
+                  h_id = teams.get("home", {}).get("id")
+                  a_id = teams.get("away", {}).get("id")
 
-          print("LINEUPS HTTP:", lineups.status_code)
+                  print(
+                      h_id,
+                      "-",
+                      a_id,
+                      "|",
+                      h_name,
+                      "vs",
+                      a_name,
+                      "|",
+                      league.get("name"),
+                      "|",
+                      fixture.get("date")
+                  )
 
-          # 6. Ambil H2H
-          h2h = requests.get(
-              "https://v3.football.api-sports.io/fixtures/headtohead",
-              headers=HEADERS,
-              params={
-                  "h2h": f"{home_id}-{away_id}"
-              },
-              timeout=30
-          )
+              print("----------------------------------------")
+              print("FIXTURE RESOLUTION: FAILED")
 
-          print("H2H HTTP:", h2h.status_code)
+              sys.exit(1)
 
-          print("--------------------------------")
+          # ============================================================
+          # 6. FIXTURE BERHASIL
+          # ============================================================
+
+          fixture = matched.get("fixture", {})
+          league = matched.get("league", {})
+          teams = matched.get("teams", {})
+
+          fixture_id = fixture.get("id")
+
+          print("----------------------------------------")
           print("FIXTURE RESOLUTION: PASS")
-          print("EVIDENCE COLLECTION: PASS")
-          print("TEAM ID:", home_id, "-", away_id)
+          print("----------------------------------------")
+
           print("FIXTURE ID:", fixture_id)
-          print("--------------------------------")
-          PY
+
+          print(
+              "MATCH:",
+              teams.get("home", {}).get("name"),
+              "vs",
+              teams.get("away", {}).get("name")
+          )
+
+          print("LEAGUE:", league.get("name"))
+          print("COUNTRY:", league.get("country"))
+          print("DATE:", fixture.get("date"))
+          print("STATUS:", fixture.get("status", {}).
