@@ -1,0 +1,70 @@
+name: API Football Connection Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-api-football:
+    runs-on: ubuntu-latest
+
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Test API-Football
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          key = os.environ.get("API_FOOTBALL_KEY")
+
+          if not key:
+              print("ERROR: API_FOOTBALL_KEY tidak ditemukan")
+              raise SystemExit(1)
+
+          url = "https://v3.football.api-sports.io/status"
+
+          response = requests.get(
+              url,
+              headers={
+                  "x-apisports-key": key
+              },
+              timeout=30
+          )
+
+          print("HTTP STATUS:", response.status_code)
+
+          if response.status_code != 200:
+              print("API CONNECTION FAILED")
+              print(response.text[:500])
+              raise SystemExit(1)
+
+          data = response.json()
+
+          print("API CONNECTION: OK")
+
+          if "response" in data:
+              print("API STATUS RESPONSE:")
+              print(data["response"])
+
+          errors = data.get("errors", {})
+          if errors:
+              print("API ERRORS:", errors)
+              raise SystemExit(1)
+
+          print("API-FOOTBALL TEST: PASS")
+          PY
