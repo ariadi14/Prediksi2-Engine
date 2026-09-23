@@ -5,115 +5,91 @@ on:
   push:
     branches:
       - main
-      - master
 
 permissions:
   contents: read
 
 jobs:
-  validate:
-    name: V20.78.50 Full Validation
+  validation:
+    name: V20.78.50 Validation
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.13
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-          cache: "pip"
+          python-version: "3.11"
 
-      - name: Install system dependencies
+      - name: Setup Tesseract OCR
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            tesseract-ocr \
-            libtesseract-dev
+          sudo apt-get install -y tesseract-ocr
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install \
-            pytest \
-            pandas \
-            Pillow \
-            pytesseract \
-            rapidfuzz
+          python -m pip install pytest pandas Pillow pytesseract rapidfuzz
 
       - name: Show environment
         run: |
           python --version
           pip --version
-          tesseract --version
           pytest --version
+          tesseract --version
 
-      - name: Verify V20.78 files
+      - name: Check V20.78.50 files
         run: |
-          echo "=== V20.78 ENGINE FILES ==="
+          echo "=== Repository ==="
           ls -lah
-          echo
-          echo "=== VALIDATION MODULES ==="
-          ls -lah \
-            v20_78_45_historical_validation.py \
-            v20_78_46_batch_validation.py \
-            v20_78_47_stress_test.py \
-            v20_78_48_calibration.py \
-            v20_78_49_parlay_validation.py \
-            v20_78_50_production_gate.py \
-            test_v20_78_45_to_50.py
 
-      - name: Run V20.78.50 validation gate
+          echo
+          echo "=== V20.78.50 ==="
+          test -f v20_78_45_historical_validation.py
+          test -f v20_78_46_batch_validation.py
+          test -f v20_78_47_stress_test.py
+          test -f v20_78_48_calibration.py
+          test -f v20_78_49_parlay_validation.py
+          test -f v20_78_50_production_gate.py
+          test -f test_v20_78_45_to_50.py
+
+          echo "Semua file V20.78.50 ditemukan."
+
+      - name: Run V20.78.45 - V20.78.50 validation
         run: |
           pytest -q test_v20_78_45_to_50.py
 
-      - name: Run complete V20.78 test suite
+      - name: Run complete test suite
         run: |
           pytest -q
 
-      - name: Check production gate status
+      - name: Run production gate
         run: |
           python - <<'PY'
           from v20_78_50_production_gate import gate
 
           result = gate(
-              True,   # code tests
-              False,  # real provider verification
-              True,   # historical validation
-              True,   # stress validation
-              True,   # calibration validation
-              True    # parlay validation
+              True,
+              False,
+              True,
+              True,
+              True,
+              True
           )
 
-          print("======================================")
-          print("PREDIKSI 2 - V20.78.50 PRODUCTION GATE")
-          print("======================================")
+          print("====================================")
+          print("PREDIKSI 2 V20.78.50 PRODUCTION GATE")
+          print("====================================")
 
-          for key, value in result["checks"].items():
-              print(f"{key}: {value}")
+          print("Version :", result["version"])
+          print("Checks  :", result["checks"])
+          print("Status  :", result["status"])
+          print("Ready   :", result["ready"])
 
-          print(f"status: {result['status']}")
-          print(f"ready: {result['ready']}")
-
-          # Real provider/evidence is intentionally NOT considered
-          # verified until actual credentials and real screenshot
-          # evidence are supplied.
           if result["status"] != "NOT_READY":
               raise SystemExit(
-                  "Unexpected gate state: production readiness "
-                  "must remain blocked without real-data verification."
+                  "Production gate berada pada status yang tidak diharapkan."
               )
           PY
-
-      - name: Upload validation artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: prediksi2-v20.78.50-validation
-          path: |
-            *.json
-            *.txt
-            *.log
-          if-no-files-found: ignore
-          retention-days: 14
