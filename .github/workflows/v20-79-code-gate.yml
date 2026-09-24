@@ -1,0 +1,59 @@
+name: V20.79 - Code Gate
+
+on:
+  pull_request:
+    paths:
+      - "fast_pelangi_parser.py"
+      - "v20_78_3_live_providers.py"
+      - "v20_79_real_pipeline.py"
+      - "test_v20_79_real_pipeline.py"
+      - ".github/workflows/v20-79-final-real-pipeline.yml"
+      - ".github/workflows/v20-79-code-gate.yml"
+  push:
+    branches:
+      - "v20-79-final-pipeline"
+
+permissions:
+  contents: read
+
+jobs:
+  code-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install pillow pytesseract rapidfuzz numpy pandas scipy scikit-learn pytest
+
+      - name: Compile Python
+        run: |
+          set -euo pipefail
+          python -m compileall -q .
+          echo "PYTHON COMPILE: PASS"
+
+      - name: Import final pipeline
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import fast_pelangi_parser
+          import v20_78_3_live_providers
+          import v20_78_35_fixture_validation
+          import v20_78_39_provider_aware_pipeline
+          import v20_78_43_real_probability
+          import v20_79_real_pipeline
+          print("IMPORT GATE: PASS")
+          PY
+
+      - name: Run V20.79 tests
+        run: |
+          set -euo pipefail
+          pytest -q test_v20_79_real_pipeline.py
+          echo "V20.79 TEST GATE: PASS"
