@@ -66,8 +66,20 @@ def _parse_total_line(raw):
         whole=int(m.group(1))
         return whole + {'¼':0.25,'½':0.5,'¾':0.75}[m.group(2)]
     raw=clean(source_raw)
+    # Also recover fractions after Unicode normalization. NFKC may turn
+    # ½/¼/¾ into forms such as "1⁄2", so do this before the trailing
+    # decimal/odds fallback can mistake 1.90 for the O/U line.
     raw=raw.replace('¼',' 1/4').replace('½',' 1/2').replace('¾',' 3/4')
     raw=re.sub(r'\s+',' ',raw).strip()
+    m=re.search(r'(?<![0-9])([0-9]{1,2})\s*(?:1\s*⁄\s*4|1\s*/\s*4)(?![0-9])',raw)
+    if m:
+        return int(m.group(1)) + 0.25
+    m=re.search(r'(?<![0-9])([0-9]{1,2})\s*(?:1\s*⁄\s*2|1\s*/\s*2)(?![0-9])',raw)
+    if m:
+        return int(m.group(1)) + 0.5
+    m=re.search(r'(?<![0-9])([0-9]{1,2})\s*(?:3\s*⁄\s*4|3\s*/\s*4)(?![0-9])',raw)
+    if m:
+        return int(m.group(1)) + 0.75
     m=re.search(r'([0-9]+)\s*(?:(1/4|1/2|3/4)|\.([0-9]+))$', raw)
     if m:
         whole=int(m.group(1))
