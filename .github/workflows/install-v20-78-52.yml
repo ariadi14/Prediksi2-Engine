@@ -1,0 +1,102 @@
+name: Install V20.78.52 From ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install-v20-78-52:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find V20.78.52 ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="Prediksi2_Engine_V20_78_52_GITHUB_READY.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP tidak ditemukan."
+            exit 1
+          fi
+
+          echo "ZIP ditemukan:"
+          ls -lh "$ZIP"
+
+      - name: Extract engine
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf /tmp/prediksi2_extract
+          mkdir -p /tmp/prediksi2_extract
+
+          unzip -q \
+            "Prediksi2_Engine_V20_78_52_GITHUB_READY.zip" \
+            -d /tmp/prediksi2_extract
+
+          if [ ! -d "/tmp/prediksi2_extract/engine" ]; then
+            echo "ERROR: folder engine/ tidak ditemukan di dalam ZIP."
+            find /tmp/prediksi2_extract -maxdepth 3 -type f | head -100
+            exit 1
+          fi
+
+          echo "Isi engine:"
+          find /tmp/prediksi2_extract/engine -maxdepth 2 -type f | sort | head -200
+
+      - name: Install engine into repository
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rsync -a \
+            --exclude='.git/' \
+            /tmp/prediksi2_extract/engine/ \
+            ./
+
+          echo "Engine V20.78.52 berhasil dipasang."
+
+      - name: Verify V20.78.52
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f "MANIFEST_V20_78_52_GITHUB_READY.json"
+          test -f "README_V20_78_52_GITHUB_READY.md"
+          test -f "v20_78_52_entity_classifier.py"
+          test -f "v20_78_52_provider_router.py"
+
+          echo "====================================="
+          echo "V20.78.52 SOURCE VERIFICATION: PASS"
+          echo "====================================="
+
+      - name: Commit V20.78.52
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "Tidak ada perubahan untuk di-commit."
+            exit 0
+          fi
+
+          git commit -m "Install Prediksi2 Engine V20.78.52"
+
+          git push origin HEAD:main
+
+          echo "====================================="
+          echo "V20.78.52 INSTALL: SUCCESS"
+          echo "====================================="
