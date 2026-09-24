@@ -18,7 +18,7 @@ DRAW_WORDS={'draw','drow','drawn','braw'}
 def clean(s):
     s = unicodedata.normalize('NFKC', str(s))
     # Keep ordinary Latin letters/digits and the punctuation used by the source.
-    s = re.sub(r'[^A-Za-z0-9&./()\[\]\-: ]+', ' ', s)
+    s = re.sub(r'[^A-Za-z0-9¼½¾&./()\[\]\-: ]+', ' ', s)
     return re.sub(r'\s+', ' ', s).strip()
 
 def norm(s):
