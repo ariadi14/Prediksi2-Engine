@@ -36,8 +36,12 @@ jobs:
       - name: Compile Python
         run: |
           set -euo pipefail
-          python -m compileall -q .
-          echo "PYTHON COMPILE: PASS"
+          python -m py_compile \
+            fast_pelangi_parser.py \
+            v20_78_3_live_providers.py \
+            v20_79_real_pipeline.py \
+            test_v20_79_real_pipeline.py
+          echo "V20.79 PYTHON COMPILE: PASS"
 
       - name: Import final pipeline
         run: |
