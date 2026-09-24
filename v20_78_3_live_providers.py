@@ -209,16 +209,26 @@ class APIFootballProvider:
         out={"provider":"api-football","fixture_match":None}
         if not home or not away:return out
         try:
-            params={'date':date} if date else ({'team':fixture.get('home_provider_ids',{}).get('api-football'),'next':50} if fixture.get('home_provider_ids',{}).get('api-football') else {'next':50})
-            d=self.http.get('/fixtures',params)
-            candidates=d.get('response',[]) if isinstance(d,dict) else []
-            def norm(s): return ''.join(c.lower() for c in str(s) if c.isalnum())
-            hn,an=norm(home),norm(away)
+            # The resolver already validated a real provider fixture. Reuse its
+            # authoritative fixture ID instead of re-querying the whole day and
+            # matching names a second time.
+            fid=fixture.get('fixture_id')
             best=None
-            for f in candidates:
-                h=norm(f.get('teams',{}).get('home',{}).get('name','')); a=norm(f.get('teams',{}).get('away',{}).get('name',''))
-                if h==hn and a==an: best=f; break
-                if (hn in h or h in hn) and (an in a or a in an): best=f
+            if fid:
+                d=self.http.get('/fixtures',{'id':fid})
+                candidates=d.get('response',[]) if isinstance(d,dict) else []
+                if candidates:
+                    best=candidates[0]
+            if best is None:
+                params={'date':date} if date else ({'team':fixture.get('home_provider_ids',{}).get('api-football'),'next':50} if fixture.get('home_provider_ids',{}).get('api-football') else {'next':50})
+                d=self.http.get('/fixtures',params)
+                candidates=d.get('response',[]) if isinstance(d,dict) else []
+                def norm(s): return ''.join(c.lower() for c in str(s) if c.isalnum())
+                hn,an=norm(home),norm(away)
+                for f in candidates:
+                    h=norm(f.get('teams',{}).get('home',{}).get('name','')); a=norm(f.get('teams',{}).get('away',{}).get('name',''))
+                    if h==hn and a==an or ((hn in h or h in hn) and (an in a or a in an)):
+                        best=f; break
             if not best:return out
             out['fixture_match']=best; fid=best.get('fixture',{}).get('id')
             if not fid:return out
@@ -259,15 +269,22 @@ def flatten_provider_payload(raw:Dict[str,Any])->Dict[str,Any]:
             except: pass
         comp=p.get('comparison') or {}
         # API-Football prediction comparison can contain attack/defence percentages.
+        def pct(value):
+            try:
+                return float(str(value).replace('%','').strip()) / 100.0
+            except Exception:
+                return None
         try:
             atk=comp.get('att') or {}
-            if atk.get('home') is not None and atk.get('away') is not None:
-                out['home_attack']=float(atk['home'])/100; out['away_attack']=float(atk['away'])/100
+            ah,aa=pct(atk.get('home')),pct(atk.get('away'))
+            if ah is not None and aa is not None:
+                out['home_attack']=ah; out['away_attack']=aa
         except Exception: pass
         try:
             de=comp.get('def') or {}
-            if de.get('home') is not None and de.get('away') is not None:
-                out['home_defence']=float(de['home'])/100; out['away_defence']=float(de['away'])/100
+            dh,da=pct(de.get('home')),pct(de.get('away'))
+            if dh is not None and da is not None:
+                out['home_defence']=dh; out['away_defence']=da
         except Exception: pass
     xg=raw.get('xg')
     if isinstance(xg,dict):
