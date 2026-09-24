@@ -6,28 +6,38 @@ on:
 jobs:
   test-sportmonks:
     runs-on: ubuntu-latest
+
     env:
       SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
 
     steps:
-      - name: Test Sportmonks API
+      - name: Validate token secret
         shell: bash
         run: |
           set -euo pipefail
 
           if [ -z "${SPORTMONKS_API_TOKEN:-}" ]; then
-            echo "SPORTMONKS_API_TOKEN is not configured"
+            echo "ERROR: SPORTMONKS_API_TOKEN is not configured"
             exit 1
           fi
 
+          echo "SPORTMONKS_API_TOKEN is available"
+
+      - name: Test Sportmonks API
+        shell: bash
+        run: |
+          set -euo pipefail
+
           echo "Calling Sportmonks Football API..."
 
-          HTTP_CODE=$(curl -sS -o /tmp/sportmonks.json -w "%{http_code}" \
-            -H "Authorization: Bearer ${SPORTMONKS_API_TOKEN}" \
+          HTTP_CODE=$(curl -sS \
+            -o /tmp/sportmonks.json \
+            -w "%{http_code}" \
             -H "Accept: application/json" \
+            -H "Authorization: ${SPORTMONKS_API_TOKEN}" \
             "https://api.sportmonks.com/v3/football/leagues")
 
-          echo "HTTP status: $HTTP_CODE"
+          echo "HTTP status: ${HTTP_CODE}"
 
           python - <<'PY'
           import json
@@ -37,20 +47,29 @@ jobs:
 
           print("Response keys:", list(data.keys()))
 
+          if "message" in data:
+              print("MESSAGE:", data["message"])
+
           if "data" in data:
               if isinstance(data["data"], list):
                   print("DATA_COUNT:", len(data["data"]))
               else:
-                  print("DATA_COUNT: 1")
+                  print("DATA_PRESENT: YES")
 
-          if data.get("message"):
-              print("MESSAGE:", data["message"])
+          if "pagination" in data:
+              print("PAGINATION: OK")
+
+          if "rate_limit" in data:
+              print("RATE_LIMIT: PRESENT")
           PY
 
-          if [ "$HTTP_CODE" != "200" ]; then
+          if [ "${HTTP_CODE}" != "200" ]; then
             echo "Sportmonks API test failed"
             cat /tmp/sportmonks.json
             exit 1
           fi
 
-          echo "Sportmonks API connection: PASS"
+          echo ""
+          echo "====================================="
+          echo "SPORTMONKS API CONNECTION: PASS"
+          echo "====================================="
