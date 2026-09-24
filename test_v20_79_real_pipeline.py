@@ -18,7 +18,7 @@ def test_hdp_quarter_line_returns_finite_value():
 def test_auto_fixture_date_uses_jakarta_calendar():
     from v20_79_real_pipeline import resolve_fixture_search_date
     import re
-    assert re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", resolve_fixture_search_date("AUTO"))
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", resolve_fixture_search_date("AUTO"))
 
 
 def test_explicit_fixture_date_is_reproducible():
