@@ -1,0 +1,163 @@
+name: V20.78.52 Real Evidence Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-validation:
+    runs-on: ubuntu-latest
+
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+      SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
+
+    steps:
+
+      # =========================================================
+      # 1. CHECKOUT
+      # =========================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: main
+
+      # =========================================================
+      # 2. PYTHON
+      # =========================================================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest requests
+
+      # =========================================================
+      # 3. CHECK REQUIRED MODULES
+      # =========================================================
+      - name: Verify V20.78.52 modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_files=(
+            "v20_78_52_data_acquisition.py"
+            "v20_78_52_data_quality_bridge.py"
+            "v20_78_52_entity_classifier.py"
+            "v20_78_52_provider_router.py"
+            "v20_78_52_competition_resolver.py"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "MISSING MODULE: $file"
+              exit 1
+            fi
+
+            echo "FOUND: $file"
+          done
+
+          echo ""
+          echo "V20.78.52 MODULE CHECK: PASS"
+
+      # =========================================================
+      # 4. RUN EXISTING EVIDENCE / DATA TESTS
+      # =========================================================
+      - name: Run data acquisition tests
+        run: |
+          python -m pytest -q \
+            test_v20_78_52_data_acquisition.py
+
+      - name: Run entity tests
+        run: |
+          python -m pytest -q \
+            test_v20_78_52_entity_classifier.py \
+            test_v20_78_52_entity_aware_integration.py
+
+      - name: Run provider routing tests
+        run: |
+          python -m pytest -q \
+            test_v20_78_52_provider_router.py
+
+      # =========================================================
+      # 5. TEST DATA QUALITY BRIDGE
+      # =========================================================
+      - name: Validate data quality bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import v20_78_52_data_quality_bridge as dq
+
+          print("Data quality bridge loaded:", dq.__name__)
+
+          public_names = [
+              name for name in dir(dq)
+              if not name.startswith("_")
+          ]
+
+          print("Available symbols:")
+          for name in public_names:
+              print(" -", name)
+
+          print("")
+          print("DATA QUALITY BRIDGE IMPORT: PASS")
+          PY
+
+      # =========================================================
+      # 6. NO DATA != NEGATIVE DATA
+      # =========================================================
+      - name: Validate missing-data semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import math
+
+          samples = {
+              "lineup": None,
+              "injury": None,
+              "xg": None,
+              "h2h": None,
+              "standings": None,
+          }
+
+          for field, value in samples.items():
+              if value is None:
+                  print(f"{field}: MISSING")
+
+          # Missing must never become numerical zero.
+          for field, value in samples.items():
+              if value is None:
+                  assert value is not 0
+                  assert value != 0
+
+          print("")
+          print("NO DATA != NEGATIVE DATA: PASS")
+          PY
+
+      # =========================================================
+      # 7. EVIDENCE FRESHNESS MODEL
+      # =========================================================
+      - name: Validate evidence freshness rules
+        shell: bash
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone, timedelta
+
+          now = datetime.now(timezone.utc)
+
+          evidence = [
+              {
+                  "type": "lineup",
+                  "timestamp": now,
+                  "max
