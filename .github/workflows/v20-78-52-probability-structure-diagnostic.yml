@@ -1,0 +1,332 @@
+name: V20.78.52 Probability Structure Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =========================================================
+      # 1. CHECKOUT MAIN
+      # =========================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: main
+
+      # =========================================================
+      # 2. PYTHON
+      # =========================================================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # =========================================================
+      # 3. BASIC REPOSITORY INFORMATION
+      # =========================================================
+      - name: Show repository information
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "REPOSITORY INFORMATION"
+          echo "=============================================="
+
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Git commit:"
+          git rev-parse HEAD
+
+          echo ""
+          echo "Git branch:"
+          git branch --show-current
+
+          echo ""
+          echo "Repository root:"
+          ls -la
+
+      # =========================================================
+      # 4. FIND ALL PYTHON FILES
+      # =========================================================
+      - name: Find Python source files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "ALL PYTHON FILES"
+          echo "=============================================="
+
+          find . \
+            -type f \
+            -name "*.py" \
+            -not -path "./.git/*" \
+            | sort
+
+      # =========================================================
+      # 5. FIND PROBABILITY FILES
+      # =========================================================
+      - name: Find probability related files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "PROBABILITY RELATED FILES"
+          echo "=============================================="
+
+          find . \
+            -type f \
+            \( \
+              -iname "*probability*" \
+              -o -iname "*score*" \
+              -o -iname "*market*" \
+              -o -iname "*calibration*" \
+              -o -iname "*qualification*" \
+              -o -iname "*parlay*" \
+            \) \
+            -not -path "./.git/*" \
+            | sort
+
+      # =========================================================
+      # 6. SEARCH V20.78.51 REFERENCES
+      # =========================================================
+      - name: Search V20.78.51 references
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "V20.78.51 REFERENCES"
+          echo "=============================================="
+
+          if grep -R \
+            -n \
+            -I \
+            --exclude-dir=.git \
+            "V20.78.51" \
+            .; then
+
+            echo ""
+            echo "V20.78.51 references FOUND"
+
+          else
+
+            echo ""
+            echo "NO V20.78.51 TEXT REFERENCE FOUND"
+
+          fi
+
+      # =========================================================
+      # 7. SEARCH EXPECTED MODULE NAMES
+      # =========================================================
+      - name: Check expected probability modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "EXPECTED PROBABILITY MODULES"
+          echo "=============================================="
+
+          files=(
+            "v20_78_51_probability_core.py"
+            "v20_78_probability_engine.py"
+            "v20_78_51_market_registry.py"
+            "v20_78_51_market_value.py"
+            "v20_78_51_calibration.py"
+            "v20_78_51_match_qualification.py"
+            "v20_78_51_parlay.py"
+          )
+
+          for file in "${files[@]}"; do
+
+            echo ""
+
+            matches=$(find . \
+              -type f \
+              -name "$file" \
+              -not -path "./.git/*" \
+              || true)
+
+            if [ -n "$matches" ]; then
+              echo "FOUND:"
+              echo "$matches"
+            else
+              echo "MISSING: $file"
+            fi
+
+          done
+
+      # =========================================================
+      # 8. SEARCH SIMILAR MODULE NAMES
+      # =========================================================
+      - name: Search similar probability module names
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "SIMILAR MODULE NAMES"
+          echo "=============================================="
+
+          find . \
+            -type f \
+            -not -path "./.git/*" \
+            \( \
+              -iname "*probability*.py" \
+              -o -iname "*engine*.py" \
+              -o -iname "*market*.py" \
+              -o -iname "*calibrat*.py" \
+              -o -iname "*qualif*.py" \
+              -o -iname "*parlay*.py" \
+            \) \
+            | sort
+
+      # =========================================================
+      # 9. PYTHON IMPORT PATH
+      # =========================================================
+      - name: Inspect Python environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/python_environment.py <<'PY'
+          import os
+          import sys
+
+          print("Python version:")
+          print(sys.version)
+
+          print("")
+          print("Working directory:")
+          print(os.getcwd())
+
+          print("")
+          print("sys.path:")
+
+          for path in sys.path:
+              print(path)
+
+          print("")
+          print("Root Python files:")
+
+          for name in sorted(os.listdir(".")):
+              if name.endswith(".py"):
+                  print(name)
+          PY
+
+          python /tmp/python_environment.py
+
+      # =========================================================
+      # 10. TRY IMPORTING EXISTING PROBABILITY MODULES
+      # =========================================================
+      - name: Test existing probability imports
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_probability_imports.py <<'PY'
+          import importlib
+          import os
+
+          candidates = [
+              "v20_78_51_probability_core",
+              "v20_78_probability_engine",
+              "v20_78_51_market_registry",
+              "v20_78_51_market_value",
+              "v20_78_51_calibration",
+              "v20_78_51_match_qualification",
+              "v20_78_51_parlay",
+          ]
+
+          print("==============================================")
+          print("IMPORT TEST")
+          print("==============================================")
+
+          for module_name in candidates:
+
+              print("")
+              print("Testing:", module_name)
+
+              try:
+                  module = importlib.import_module(module_name)
+
+                  print("IMPORT: PASS")
+                  print(
+                      "Location:",
+                      getattr(
+                          module,
+                          "__file__",
+                          "UNKNOWN"
+                      )
+                  )
+
+              except Exception as exc:
+
+                  print("IMPORT: FAIL")
+                  print(
+                      "Error type:",
+                      type(exc).__name__
+                  )
+                  print(
+                      "Error:",
+                      str(exc)
+                  )
+
+          print("")
+          print("IMPORT DIAGNOSTIC COMPLETE")
+          PY
+
+          python /tmp/test_probability_imports.py
+
+      # =========================================================
+      # 11. CHECK TEST FILES
+      # =========================================================
+      - name: Find probability test files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "PROBABILITY TEST FILES"
+          echo "=============================================="
+
+          find . \
+            -type f \
+            -name "test*.py" \
+            -not -path "./.git/*" \
+            | sort
+
+      # =========================================================
+      # 12. FINAL DIAGNOSTIC SUMMARY
+      # =========================================================
+      - name: Diagnostic summary
+        shell: bash
+        run: |
+          echo ""
+          echo "=================================================="
+          echo "V20.78.52 PROBABILITY STRUCTURE DIAGNOSTIC"
+          echo "=================================================="
+          echo ""
+          echo "Diagnostic completed."
+          echo ""
+          echo "IMPORTANT:"
+          echo "This workflow does NOT modify the engine."
+          echo "This workflow does NOT create a replacement"
+          echo "Probability Core."
+          echo ""
+          echo "It only identifies the actual probability"
+          echo "modules currently present in main."
+          echo "=================================================="
