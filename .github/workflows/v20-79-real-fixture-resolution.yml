@@ -1,0 +1,355 @@
+name: V20.79 - Real Fixture Resolution
+
+on:
+  workflow_dispatch:
+    inputs:
+      screenshot_path:
+        description: "Path screenshot PelangiEuro"
+        required: true
+        default: "testdata/screenshots/pelangieuro_test.png"
+        type: string
+
+      time_window:
+        description: "Filter waktu manual"
+        required: true
+        default: "00:00-05:00"
+        type: choice
+        options:
+          - "18:00-21:00"
+          - "21:00-00:00"
+          - "00:00-05:00"
+          - "05:00-10:00"
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-resolution:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+
+          pip install \
+            pillow \
+            pytesseract \
+            numpy \
+            pandas \
+            scipy \
+            scikit-learn \
+            pytest
+
+      - name: Install OCR engine
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
+          tesseract --version
+
+      - name: Validate screenshot
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$SCREENSHOT_PATH" ]; then
+            echo "ERROR: Screenshot tidak ditemukan:"
+            echo "$SCREENSHOT_PATH"
+            exit 1
+          fi
+
+          python - "$SCREENSHOT_PATH" <<'PY'
+          import sys
+          from PIL import Image
+
+          path = sys.argv[1]
+
+          image = Image.open(path)
+
+          print("FORMAT:", image.format)
+          print("SIZE:", image.size)
+          print("MODE:", image.mode)
+
+          assert image.width > 0
+          assert image.height > 0
+
+          print("SCREENSHOT VALIDATION: PASS")
+          PY
+
+      - name: OCR screenshot
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          python - "$SCREENSHOT_PATH" <<'PY'
+          import sys
+          from pathlib import Path
+
+          import pytesseract
+          from PIL import Image
+
+          path = sys.argv[1]
+
+          image = Image.open(path)
+
+          text = pytesseract.image_to_string(
+              image,
+              config="--psm 6"
+          )
+
+          Path(
+              "artifacts/screenshot_ocr.txt"
+          ).write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print("==========================================")
+          print("OCR TEXT")
+          print("==========================================")
+          print(text)
+          print("==========================================")
+
+          if not text.strip():
+              raise SystemExit(
+                  "OCR menghasilkan teks kosong."
+              )
+
+          print("OCR: PASS")
+          PY
+
+      - name: Extract candidate team lines
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/extract_matches.py <<'PY'
+          import re
+          import json
+          from pathlib import Path
+
+          text = Path(
+              "artifacts/screenshot_ocr.txt"
+          ).read_text(
+              encoding="utf-8"
+          )
+
+          lines = [
+              line.strip()
+              for line in text.splitlines()
+              if line.strip()
+          ]
+
+          candidates = []
+
+          time_pattern = re.compile(
+              r"\b([01]?[0-9]|2[0-3]):([0-5][0-9])\b"
+          )
+
+          for index, line in enumerate(lines):
+
+              match = time_pattern.search(line)
+
+              if not match:
+                  continue
+
+              hour = int(match.group(1))
+              minute = int(match.group(2))
+
+              candidates.append({
+                  "raw_line": line,
+                  "kickoff": f"{hour:02d}:{minute:02d}",
+                  "source_line_index": index
+              })
+
+          Path(
+              "artifacts/fixture_candidates.json"
+          ).write_text(
+              json.dumps(
+                  candidates,
+                  indent=2,
+                  ensure_ascii=False
+              ),
+              encoding="utf-8"
+          )
+
+          print(
+              f"TIME-LIKE LINES FOUND: {len(candidates)}"
+          )
+
+          for item in candidates:
+              print(
+                  item["kickoff"],
+                  "|",
+                  item["raw_line"]
+              )
+          PY
+
+          python /tmp/extract_matches.py
+
+      - name: Validate manual time window
+        env:
+          TIME_WINDOW: ${{ inputs.time_window }}
+        run: |
+          set -euo pipefail
+
+          python - "$TIME_WINDOW" <<'PY'
+          import sys
+
+          value = sys.argv[1]
+
+          allowed = {
+              "18:00-21:00",
+              "21:00-00:00",
+              "00:00-05:00",
+              "05:00-10:00",
+          }
+
+          if value not in allowed:
+              raise SystemExit(
+                  f"Invalid time window: {value}"
+              )
+
+          print(
+              "MANUAL TIME WINDOW:",
+              value
+          )
+
+          print(
+              "TIME WINDOW VALIDATION: PASS"
+          )
+          PY
+
+      - name: Fixture resolution contract
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_fixture_resolution.py <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+
+          candidates = json.loads(
+              Path(
+                  "artifacts/fixture_candidates.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+
+          def normalize_team_name(name):
+              value = name.upper().strip()
+
+              value = re.sub(
+                  r"[^A-Z0-9À-ÖØ-öø-ÿ .'-]",
+                  " ",
+                  value
+              )
+
+              value = re.sub(
+                  r"\s+",
+                  " ",
+                  value
+              )
+
+              return value.strip()
+
+
+          def build_fixture_candidate(item):
+              raw = item["raw_line"]
+              kickoff = item["kickoff"]
+
+              return {
+                  "fixture_candidate_id":
+                      f"OCR-{item['source_line_index']}",
+                  "raw_line": raw,
+                  "kickoff": kickoff,
+                  "home_team": None,
+                  "away_team": None,
+                  "competition": None,
+                  "provider_fixture_id": None,
+                  "resolution_status": "UNRESOLVED"
+              }
+
+
+          fixtures = [
+              build_fixture_candidate(item)
+              for item in candidates
+          ]
+
+
+          for fixture in fixtures:
+              assert fixture["fixture_candidate_id"]
+              assert fixture["raw_line"]
+              assert fixture["kickoff"]
+
+              assert (
+                  fixture["resolution_status"]
+                  == "UNRESOLVED"
+              )
+
+              # Tidak boleh mengarang provider fixture ID.
+              assert (
+                  fixture["provider_fixture_id"]
+                  is None
+              )
+
+
+          print(
+              "FIXTURE CANDIDATE CONTRACT: PASS"
+          )
+
+          print(
+              f"Candidates available: {len(fixtures)}"
+          )
+          PY
+
+          python /tmp/test_fixture_resolution.py
+
+      - name: Anti team swap validation
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_team_swap.py <<'PY'
+          def validate_fixture_identity(
+              screenshot_fixture,
+              provider_fixture
+          ):
+              screenshot_home = (
+                  screenshot_fixture["home_team"]
+                  .strip()
+                  .upper()
+              )
+
+              screenshot_away = (
+                  screenshot_fixture["away_team"]
+                  .strip()
+                  .upper()
+              )
+
+              provider_home = (
+                  provider_fixture["home_team"]
+                  .strip()
+                  .upper()
+              )
+
+              provider_away = (
+                  provider_fixture["away_team
