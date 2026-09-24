@@ -7,6 +7,11 @@ on:
         description: "Path screenshot PelangiEuro di repository, pisahkan dengan koma untuk batch"
         required: true
         type: string
+      fixture_date:
+        description: "Tanggal fixture provider: AUTO = tanggal hari ini WIB; atau YYYY-MM-DD untuk screenshot historis"
+        required: true
+        default: "AUTO"
+        type: string
       time_window:
         description: "Filter waktu manual"
         required: true
@@ -115,6 +120,7 @@ jobs:
       - name: Run FINAL REAL pipeline
         env:
           SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
+          FIXTURE_DATE: ${{ inputs.fixture_date }}
           TIME_WINDOW: ${{ inputs.time_window }}
           MIN_PROBABILITY: ${{ inputs.minimum_probability }}
           MIN_EV: ${{ inputs.minimum_ev }}
@@ -132,7 +138,7 @@ jobs:
               SCREENSHOT_ARGS+=( "$screenshot" )
           done
 
-          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --output artifacts/v20_79_final_output.json
+          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --fixture-date "$FIXTURE_DATE"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --output artifacts/v20_79_final_output.json
 
       - name: Validate FINAL output safety
         run: |
