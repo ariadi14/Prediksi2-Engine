@@ -1,0 +1,539 @@
+name: V20.79 - Real Provider Fixture Matching
+
+on:
+  workflow_dispatch:
+    inputs:
+      screenshot_path:
+        description: "Path screenshot PelangiEuro; kosongkan untuk auto-discovery"
+        required: false
+        default: ""
+        type: string
+
+      time_window:
+        description: "Filter waktu manual"
+        required: true
+        default: "00:00-05:00"
+        type: choice
+        options:
+          - "18:00-21:00"
+          - "21:00-00:00"
+          - "00:00-05:00"
+          - "05:00-10:00"
+
+permissions:
+  contents: read
+
+jobs:
+  provider-fixture-matching:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+
+          pip install \
+            requests \
+            pillow \
+            pytesseract \
+            numpy \
+            pandas \
+            scipy \
+            scikit-learn \
+            pytest
+
+      - name: Install OCR
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
+          tesseract --version
+
+      - name: Locate screenshot
+        env:
+          REQUESTED_SCREENSHOT: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          echo "=========================================="
+          echo "SCREENSHOT DISCOVERY"
+          echo "=========================================="
+
+          echo "Requested path:"
+          echo "${REQUESTED_SCREENSHOT:-<empty>}"
+          echo
+
+          SCREENSHOT=""
+
+          if [ -n "${REQUESTED_SCREENSHOT:-}" ] \
+             && [ -f "$REQUESTED_SCREENSHOT" ]; then
+
+            SCREENSHOT="$REQUESTED_SCREENSHOT"
+
+            echo "Using requested screenshot:"
+            echo "$SCREENSHOT"
+
+          else
+
+            echo "Requested screenshot was not found."
+            echo
+            echo "Searching repository for image files..."
+
+            mapfile -t IMAGES < <(
+              find . \
+                -type f \
+                \( \
+                  -iname "*.png" \
+                  -o -iname "*.jpg" \
+                  -o -iname "*.jpeg" \
+                  -o -iname "*.webp" \
+                \) \
+                -not -path "./.git/*" \
+                | sort
+            )
+
+            echo
+            echo "Image files discovered:"
+
+            if [ "${#IMAGES[@]}" -eq 0 ]; then
+              echo "NONE"
+            else
+              for image in "${IMAGES[@]}"; do
+                echo "  $image"
+              done
+            fi
+
+            if [ "${#IMAGES[@]}" -gt 0 ]; then
+              SCREENSHOT="${IMAGES[0]}"
+              echo
+              echo "Auto-selected:"
+              echo "$SCREENSHOT"
+            fi
+          fi
+
+          if [ -z "$SCREENSHOT" ]; then
+            echo
+            echo "ERROR: No screenshot found."
+            echo
+            echo "Upload a PelangiEuro screenshot into the repository."
+            echo "Example:"
+            echo "testdata/screenshots/pelangieuro_test.png"
+            exit 1
+          fi
+
+          printf '%s\n' "$SCREENSHOT" \
+            > artifacts/resolved_screenshot_path.txt
+
+          echo
+          echo "SCREENSHOT PATH RESOLVED:"
+          cat artifacts/resolved_screenshot_path.txt
+
+      - name: Validate screenshot
+        run: |
+          set -euo pipefail
+
+          SCREENSHOT="$(cat artifacts/resolved_screenshot_path.txt)"
+
+          echo "Validating:"
+          echo "$SCREENSHOT"
+
+          test -f "$SCREENSHOT"
+
+          python - "$SCREENSHOT" <<'PY'
+          import sys
+          from PIL import Image
+
+          path = sys.argv[1]
+
+          image = Image.open(path)
+
+          print("FORMAT:", image.format)
+          print("SIZE:", image.size)
+          print("MODE:", image.mode)
+
+          assert image.width > 0
+          assert image.height > 0
+
+          print("SCREENSHOT VALIDATION: PASS")
+          PY
+
+      - name: OCR screenshot
+        run: |
+          set -euo pipefail
+
+          SCREENSHOT="$(cat artifacts/resolved_screenshot_path.txt)"
+
+          python - "$SCREENSHOT" <<'PY'
+          import sys
+          from pathlib import Path
+
+          from PIL import Image
+          import pytesseract
+
+          path = sys.argv[1]
+
+          image = Image.open(path)
+
+          text = pytesseract.image_to_string(
+              image,
+              config="--psm 6"
+          )
+
+          Path(
+              "artifacts/screenshot_ocr.txt"
+          ).write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print("==========================================")
+          print("OCR RESULT")
+          print("==========================================")
+          print(text)
+          print("==========================================")
+
+          if not text.strip():
+              raise SystemExit(
+                  "OCR returned empty text."
+              )
+
+          print("OCR: PASS")
+          PY
+
+      - name: Extract kickoff candidates
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          text = Path(
+              "artifacts/screenshot_ocr.txt"
+          ).read_text(
+              encoding="utf-8"
+          )
+
+          results = []
+
+          for index, line in enumerate(
+              text.splitlines()
+          ):
+              line = line.strip()
+
+              if not line:
+                  continue
+
+              matches = re.findall(
+                  r"\b([01]?[0-9]|2[0-3]):([0-5][0-9])\b",
+                  line
+              )
+
+              for hour, minute in matches:
+                  results.append({
+                      "line_index": index,
+                      "raw_line": line,
+                      "kickoff": (
+                          f"{int(hour):02d}:{minute}"
+                      )
+                  })
+
+          Path(
+              "artifacts/time_candidates.json"
+          ).write_text(
+              json.dumps(
+                  results,
+                  indent=2,
+                  ensure_ascii=False
+              ),
+              encoding="utf-8"
+          )
+
+          print(
+              f"TIME CANDIDATES: {len(results)}"
+          )
+
+          for item in results:
+              print(
+                  item["kickoff"],
+                  "|",
+                  item["raw_line"]
+              )
+          PY
+
+      - name: Validate manual time window
+        env:
+          TIME_WINDOW: ${{ inputs.time_window }}
+        run: |
+          set -euo pipefail
+
+          case "$TIME_WINDOW" in
+            "18:00-21:00"|"21:00-00:00"|"00:00-05:00"|"05:00-10:00")
+              echo "TIME WINDOW: $TIME_WINDOW"
+              echo "TIME WINDOW VALIDATION: PASS"
+              ;;
+            *)
+              echo "Invalid time window: $TIME_WINDOW"
+              exit 1
+              ;;
+          esac
+
+      - name: Validate provider secrets
+        run: |
+          set -euo pipefail
+
+          test -n "${API_FOOTBALL_KEY:-}" || {
+            echo "API_FOOTBALL_KEY missing"
+            exit 1
+          }
+
+          test -n "${SPORTMONKS_API_TOKEN:-}" || {
+            echo "SPORTMONKS_API_TOKEN missing"
+            exit 1
+          }
+
+          test -n "${FOOTBALL_DATA_API_KEY:-}" || {
+            echo "FOOTBALL_DATA_API_KEY missing"
+            exit 1
+          }
+
+          echo "PROVIDER SECRETS: PASS"
+
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+
+      - name: API Football connectivity
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: |
+          set -euo pipefail
+
+          STATUS="$(
+            curl -sS \
+              -o /tmp/api_football.json \
+              -w "%{http_code}" \
+              -H "x-apisports-key: ${API_FOOTBALL_KEY}" \
+              "https://v3.football.api-sports.io/status"
+          )"
+
+          echo "HTTP: $STATUS"
+
+          test "$STATUS" = "200"
+
+          echo "API-FOOTBALL: PASS"
+
+      - name: Sportmonks connectivity
+        env:
+          SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          STATUS="$(
+            curl -sS \
+              -o /tmp/sportmonks.json \
+              -w "%{http_code}" \
+              -H "Accept: application/json" \
+              -H "Authorization: ${SPORTMONKS_API_TOKEN}" \
+              "https://api.sportmonks.com/v3/football/leagues"
+          )"
+
+          echo "HTTP: $STATUS"
+
+          test "$STATUS" = "200"
+
+          echo "SPORTMONKS: PASS"
+
+      - name: Football Data connectivity
+        env:
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          STATUS="$(
+            curl -sS \
+              -o /tmp/football_data.json \
+              -w "%{http_code}" \
+              -H "X-Auth-Token: ${FOOTBALL_DATA_API_KEY}" \
+              "https://api.football-data.org/v4/competitions"
+          )"
+
+          echo "HTTP: $STATUS"
+
+          test "$STATUS" = "200"
+
+          echo "FOOTBALL-DATA.ORG: PASS"
+
+      - name: Discover production fixture resolver
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "FIXTURE RESOLVER DISCOVERY"
+          echo "=========================================="
+
+          find . \
+            -type f \
+            -name "*.py" \
+            -not -path "./.git/*" \
+            \( \
+              -iname "*fixture*.py" \
+              -o -iname "*resolver*.py" \
+            \) \
+            | sort
+
+      - name: Import V20.78.52 provider router
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import importlib
+
+          modules = [
+              "v20_78_52_provider_router",
+              "v20_78_52_competition_resolver",
+              "v20_78_52_entity_classifier",
+          ]
+
+          for name in modules:
+              print("IMPORT:", name)
+              importlib.import_module(name)
+              print("PASS:", name)
+
+          print()
+          print("V20.78.52 PROVIDER CORE: PASS")
+          PY
+
+      - name: Provider fixture matching safety
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          candidates = json.loads(
+              Path(
+                  "artifacts/time_candidates.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          results = []
+
+          for item in candidates:
+              results.append({
+                  "ocr_line": item["raw_line"],
+                  "kickoff": item["kickoff"],
+                  "status": "UNRESOLVED",
+                  "provider_fixture_id": None,
+                  "reason": (
+                      "PROVIDER_MATCHING_REQUIRES_REAL_FIXTURE_LOOKUP"
+                  )
+              })
+
+          report = {
+              "version": "V20.79",
+              "baseline": "V20.78.52",
+              "candidate_count": len(results),
+              "resolved_count": 0,
+              "unresolved_count": len(results),
+              "results": results
+          }
+
+          Path(
+              "artifacts/provider_fixture_matching.json"
+          ).write_text(
+              json.dumps(
+                  report,
+                  indent=2,
+                  ensure_ascii=False
+              ),
+              encoding="utf-8"
+          )
+
+          assert (
+              report["resolved_count"]
+              + report["unresolved_count"]
+              == report["candidate_count"]
+          )
+
+          for item in results:
+              if item["status"] != "RESOLVED":
+                  assert (
+                      item["provider_fixture_id"]
+                      is None
+                  )
+
+          print(
+              "PROVIDER MATCHING SAFETY: PASS"
+          )
+          print(
+              "Unresolved fixtures remain unresolved."
+          )
+          PY
+
+      - name: Run repository tests
+        run: |
+          set -euo pipefail
+
+          if find . \
+            -type f \
+            -name "test_*.py" \
+            -not -path "./.git/*" \
+            | grep -q .; then
+
+            pytest -q
+
+          else
+            echo "No repository pytest files found."
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v20-79-provider-fixture-matching
+          path: artifacts/
+
+      - name: Final status
+        run: |
+          set -euo pipefail
+
+          echo
+          echo "======================================================"
+          echo " V20.79 PROVIDER FIXTURE MATCHING INPUT: PASS"
+          echo "======================================================"
+          echo
+          echo "Screenshot discovery: PASS"
+          echo "Screenshot validation: PASS"
+          echo "OCR: PASS"
+          echo "Time extraction: PASS"
+          echo "Manual time window: PASS"
+          echo "Provider connectivity: PASS"
+          echo "Core provider imports: PASS"
+          echo "Fixture safety: PASS"
+          echo
+          echo "IMPORTANT:"
+          echo "No Fixture ID is fabricated."
+          echo "Unresolved fixtures remain UNRESOLVED."
+          echo
+          echo "NEXT:"
+          echo "Connect real fixture lookup through"
+          echo "the validated V20.78.52 provider router."
