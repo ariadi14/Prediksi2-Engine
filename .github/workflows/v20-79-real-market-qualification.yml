@@ -1,0 +1,505 @@
+name: V20.79 Real Market Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      minimum_probability:
+        description: "Minimum probability threshold"
+        required: true
+        default: "0.60"
+
+jobs:
+  market-qualification:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy scikit-learn pytest
+
+      - name: Locate probability artifacts
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          PROBABILITY_FILE=""
+
+          if [ -f "artifacts/real_probability_output.json" ]; then
+            PROBABILITY_FILE="artifacts/real_probability_output.json"
+          else
+            PROBABILITY_FILE="$(find . -type f \
+              -name 'real_probability_output.json' \
+              ! -path './.git/*' \
+              | head -n 1 || true)"
+          fi
+
+          if [ -z "$PROBABILITY_FILE" ]; then
+            echo "ERROR: real_probability_output.json not found."
+            exit 1
+          fi
+
+          echo "PROBABILITY_FILE=$PROBABILITY_FILE" >> "$GITHUB_ENV"
+          echo "Using: $PROBABILITY_FILE"
+
+      - name: Locate probability input
+        run: |
+          set -euo pipefail
+
+          INPUT_FILE=""
+
+          if [ -f "artifacts/real_probability_input.json" ]; then
+            INPUT_FILE="artifacts/real_probability_input.json"
+          else
+            INPUT_FILE="$(find . -type f \
+              -name 'real_probability_input.json' \
+              ! -path './.git/*' \
+              | head -n 1 || true)"
+          fi
+
+          if [ -z "$INPUT_FILE" ]; then
+            echo "ERROR: real_probability_input.json not found."
+            exit 1
+          fi
+
+          echo "PROBABILITY_INPUT=$INPUT_FILE" >> "$GITHUB_ENV"
+          echo "Using: $INPUT_FILE"
+
+      - name: Build qualification engine
+        env:
+          MINIMUM_PROBABILITY: ${{ inputs.minimum_probability }}
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/qualify_markets.py <<'PY'
+          import json
+          import math
+          import os
+          import re
+          from pathlib import Path
+
+          probability_path = Path(os.environ["PROBABILITY_FILE"])
+          input_path = Path(os.environ["PROBABILITY_INPUT"])
+
+          probability_data = json.loads(
+              probability_path.read_text(encoding="utf-8")
+          )
+
+          input_data = json.loads(
+              input_path.read_text(encoding="utf-8")
+          )
+
+          threshold = float(
+              os.environ["MINIMUM_PROBABILITY"]
+          )
+
+          if not 0.0 <= threshold <= 1.0:
+              raise RuntimeError(
+                  "Minimum probability must be between 0 and 1."
+              )
+
+          inputs_by_fixture = {
+              str(item.get("fixture_id")): item
+              for item in input_data.get("fixtures", [])
+          }
+
+          def normalize(text):
+              if text is None:
+                  return ""
+
+              text = str(text).lower()
+              text = text.replace("–", "-")
+              text = text.replace("—", "-")
+              text = re.sub(r"\s+", " ", text)
+              return text.strip()
+
+          def extract_line(text):
+              text = normalize(text)
+
+              patterns = [
+                  r"([+-]?\d+(?:\.\d+)?)",
+                  r"(\d+/\d+)",
+              ]
+
+              for pattern in patterns:
+                  match = re.search(pattern, text)
+                  if match:
+                      return match.group(1)
+
+              return None
+
+          def market_key(text):
+              t = normalize(text)
+
+              if "over" in t:
+                  return "OVER"
+
+              if "under" in t:
+                  return "UNDER"
+
+              if "home" in t:
+                  return "HOME"
+
+              if "away" in t:
+                  return "AWAY"
+
+              if "draw" in t:
+                  return "DRAW"
+
+              if "hdp" in t:
+                  return "HDP"
+
+              if "handicap" in t:
+                  return "HDP"
+
+              return "UNKNOWN"
+
+          def numeric_probability(value):
+              if isinstance(value, bool):
+                  return None
+
+              if isinstance(value, (int, float)):
+                  if math.isfinite(value) and 0 <= value <= 1:
+                      return float(value)
+
+              return None
+
+          def visible_market_map(raw_markets):
+              result = []
+
+              if not isinstance(raw_markets, list):
+                  return result
+
+              for raw in raw_markets:
+                  if isinstance(raw, str):
+                      text = raw
+                      result.append({
+                          "raw": text,
+                          "normalized": normalize(text),
+                          "market": market_key(text),
+                          "line": extract_line(text)
+                      })
+
+                  elif isinstance(raw, dict):
+                      text = (
+                          raw.get("raw")
+                          or raw.get("market")
+                          or raw.get("selection")
+                          or raw.get("name")
+                          or ""
+                      )
+
+                      line = (
+                          raw.get("line")
+                          if raw.get("line") is not None
+                          else extract_line(text)
+                      )
+
+                      result.append({
+                          "raw": text,
+                          "normalized": normalize(text),
+                          "market": market_key(text),
+                          "line": str(line) if line is not None else None
+                      })
+
+              return result
+
+          def find_probability(
+              probabilities,
+              market,
+              line=None,
+              raw_market=None
+          ):
+              if not isinstance(probabilities, dict):
+                  return None
+
+              candidates = []
+
+              for key, value in probabilities.items():
+                  p = numeric_probability(value)
+
+                  if p is None:
+                      continue
+
+                  key_text = normalize(key)
+
+                  candidates.append(
+                      (key_text, p)
+                  )
+
+              target_market = normalize(market)
+              target_line = normalize(line) if line else ""
+
+              for key_text, probability in candidates:
+                  if target_market not in key_text:
+                      continue
+
+                  if target_line:
+                      if target_line in key_text:
+                          return probability
+
+                  else:
+                      return probability
+
+              return None
+
+          def get_base_probabilities(result):
+              probabilities = result.get("probabilities")
+
+              if not isinstance(probabilities, dict):
+                  return {}
+
+              output = {}
+
+              aliases = {
+                  "HOME": [
+                      "home",
+                      "home_probability",
+                      "prob_home",
+                      "1"
+                  ],
+                  "DRAW": [
+                      "draw",
+                      "draw_probability",
+                      "prob_draw",
+                      "x"
+                  ],
+                  "AWAY": [
+                      "away",
+                      "away_probability",
+                      "prob_away",
+                      "2"
+                  ]
+              }
+
+              normalized = {
+                  normalize(k): v
+                  for k, v in probabilities.items()
+              }
+
+              for market, keys in aliases.items():
+                  for key in keys:
+                      value = normalized.get(normalize(key))
+                      p = numeric_probability(value)
+
+                      if p is not None:
+                          output[market] = p
+                          break
+
+              return output
+
+          qualified = []
+          rejected = []
+
+          results = probability_data.get("results", [])
+
+          for result in results:
+              fixture_id = result.get("fixture_id")
+
+              source = inputs_by_fixture.get(
+                  str(fixture_id)
+              )
+
+              if not source:
+                  rejected.append({
+                      "fixture_id": fixture_id,
+                      "reason": "NO_PROBABILITY_INPUT"
+                  })
+                  continue
+
+              if result.get("status") != "CALCULATED":
+                  rejected.append({
+                      "fixture_id": fixture_id,
+                      "home_team": result.get("home_team"),
+                      "away_team": result.get("away_team"),
+                      "reason": "INSUFFICIENT_DATA"
+                  })
+                  continue
+
+              visible = visible_market_map(
+                  source.get("market_candidates", [])
+              )
+
+              if not visible:
+                  rejected.append({
+                      "fixture_id": fixture_id,
+                      "home_team": result.get("home_team"),
+                      "away_team": result.get("away_team"),
+                      "reason": "NO_VISIBLE_MARKET"
+                  })
+                  continue
+
+              probabilities = result.get(
+                  "probabilities"
+              )
+
+              market_probabilities = result.get(
+                  "market_probabilities"
+              )
+
+              base_probabilities = get_base_probabilities(
+                  result
+              )
+
+              candidates = []
+
+              for market in visible:
+                  market_type = market["market"]
+                  line = market["line"]
+                  raw = market["raw"]
+
+                  probability = None
+                  source_type = None
+
+                  if isinstance(
+                      market_probabilities,
+                      dict
+                  ):
+                      probability = find_probability(
+                          market_probabilities,
+                          market_type,
+                          line,
+                          raw
+                      )
+
+                      if probability is not None:
+                          source_type = (
+                              "market_probability"
+                          )
+
+                  if (
+                      probability is None
+                      and market_type in base_probabilities
+                      and line is None
+                  ):
+                      probability = base_probabilities[
+                          market_type
+                      ]
+                      source_type = (
+                          "base_probability"
+                      )
+
+                  if probability is None:
+                      rejected.append({
+                          "fixture_id": fixture_id,
+                          "home_team": result.get("home_team"),
+                          "away_team": result.get("away_team"),
+                          "market": raw,
+                          "reason": "NO_MARKET_PROBABILITY"
+                      })
+                      continue
+
+                  if not 0 <= probability <= 1:
+                      rejected.append({
+                          "fixture_id": fixture_id,
+                          "home_team": result.get("home_team"),
+                          "away_team": result.get("away_team"),
+                          "market": raw,
+                          "reason": "INVALID_PROBABILITY"
+                      })
+                      continue
+
+                  if probability < threshold:
+                      rejected.append({
+                          "fixture_id": fixture_id,
+                          "home_team": result.get("home_team"),
+                          "away_team": result.get("away_team"),
+                          "market": raw,
+                          "probability": probability,
+                          "reason": "BELOW_THRESHOLD"
+                      })
+                      continue
+
+                  candidates.append({
+                      "fixture_id": fixture_id,
+                      "home_team": result.get("home_team"),
+                      "away_team": result.get("away_team"),
+                      "competition": source.get("competition"),
+                      "entity_type": source.get("entity_type"),
+                      "market": market_type,
+                      "line": line,
+                      "selection": raw,
+                      "probability": probability,
+                      "probability_source": source_type,
+                      "market_visible_in_screenshot": True
+                  })
+
+              if candidates:
+                  qualified.extend(candidates)
+              else:
+                  rejected.append({
+                      "fixture_id": fixture_id,
+                      "home_team": result.get("home_team"),
+                      "away_team": result.get("away_team"),
+                      "reason": "NO_QUALIFIED_MARKET"
+                  })
+
+          output = {
+              "version": "V20.79",
+              "stage": "REAL_MARKET_QUALIFICATION",
+              "minimum_probability": threshold,
+              "qualified_count": len(qualified),
+              "rejected_count": len(rejected),
+              "qualified": qualified,
+              "rejected": rejected,
+              "rules": {
+                  "screenshot_market_only": True,
+                  "line_integrity": True,
+                  "no_market_invention": True,
+                  "no_forced_selection": True,
+                  "no_data_not_negative": True
+              }
+          }
+
+          Path(
+              "artifacts/v20_79_real_market_qualification.json"
+          ).write_text(
+              json.dumps(
+                  output,
+                  ensure_ascii=False,
+                  indent=2
+              ),
+              encoding="utf-8"
+          )
+
+          print(
+              json.dumps(
+                  output,
+                  ensure_ascii=False,
+                  indent=2
+              )
+          )
+          PY
+
+          python /tmp/qualify_markets.py
+
+      - name: Hard market integrity audit
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path(
+              "artifacts/v20_79_real_market_qualification.json"
+          )
+
+          data = json.loads(
+              path.read_text(encoding="utf-8")
+          )
+
+          for item in data.get("qualified", []):
+
+              if not item.get(
+                  "
