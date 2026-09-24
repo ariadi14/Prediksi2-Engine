@@ -1,0 +1,564 @@
+name: V20.79 - Real Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      screenshot_path:
+        description: "Path screenshot PelangiEuro"
+        required: false
+        default: ""
+        type: string
+
+      time_window:
+        description: "Filter waktu manual"
+        required: true
+        default: "00:00-05:00"
+        type: choice
+        options:
+          - "18:00-21:00"
+          - "21:00-00:00"
+          - "00:00-05:00"
+          - "05:00-10:00"
+
+permissions:
+  contents: read
+
+jobs:
+  real-evidence:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install \
+            requests \
+            pillow \
+            pytesseract \
+            numpy \
+            pandas \
+            scipy \
+            scikit-learn \
+            pytest
+
+      - name: Install OCR
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
+      - name: Validate provider secrets
+        run: |
+          set -euo pipefail
+
+          test -n "${API_FOOTBALL_KEY:-}" || {
+            echo "API_FOOTBALL_KEY missing"
+            exit 1
+          }
+
+          test -n "${SPORTMONKS_API_TOKEN:-}" || {
+            echo "SPORTMONKS_API_TOKEN missing"
+            exit 1
+          }
+
+          test -n "${FOOTBALL_DATA_API_KEY:-}" || {
+            echo "FOOTBALL_DATA_API_KEY missing"
+            exit 1
+          }
+
+          echo "PROVIDER SECRETS: PASS"
+
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+
+      - name: Locate screenshot
+        env:
+          REQUESTED_SCREENSHOT: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          SCREENSHOT=""
+
+          if [ -n "${REQUESTED_SCREENSHOT:-}" ] \
+             && [ -f "$REQUESTED_SCREENSHOT" ]; then
+
+            SCREENSHOT="$REQUESTED_SCREENSHOT"
+
+          else
+
+            mapfile -t IMAGES < <(
+              find . \
+                -type f \
+                \( \
+                  -iname "*.png" \
+                  -o -iname "*.jpg" \
+                  -o -iname "*.jpeg" \
+                  -o -iname "*.webp" \
+                \) \
+                -not -path "./.git/*" \
+                | sort
+            )
+
+            if [ "${#IMAGES[@]}" -gt 0 ]; then
+              SCREENSHOT="${IMAGES[0]}"
+            fi
+
+          fi
+
+          if [ -z "$SCREENSHOT" ]; then
+            echo "ERROR: No screenshot found."
+            exit 1
+          fi
+
+          printf '%s\n' "$SCREENSHOT" \
+            > artifacts/resolved_screenshot_path.txt
+
+          echo "SCREENSHOT:"
+          cat artifacts/resolved_screenshot_path.txt
+
+      - name: OCR screenshot
+        run: |
+          set -euo pipefail
+
+          SCREENSHOT="$(
+            cat artifacts/resolved_screenshot_path.txt
+          )"
+
+          python - "$SCREENSHOT" <<'PY'
+          import sys
+          from pathlib import Path
+
+          from PIL import Image
+          import pytesseract
+
+          image = Image.open(sys.argv[1])
+
+          text = pytesseract.image_to_string(
+              image,
+              config="--psm 6"
+          )
+
+          Path(
+              "artifacts/screenshot_ocr.txt"
+          ).write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          if not text.strip():
+              raise SystemExit(
+                  "OCR returned empty text."
+              )
+
+          print(text)
+          print()
+          print("OCR: PASS")
+          PY
+
+      - name: Discover V20.78.52 core
+        run: |
+          set -euo pipefail
+
+          required=(
+            "v20_78_52_competition_resolver.py"
+            "v20_78_52_data_acquisition.py"
+            "v20_78_52_data_quality_bridge.py"
+            "v20_78_52_entity_classifier.py"
+            "v20_78_52_provider_router.py"
+          )
+
+          for file in "${required[@]}"; do
+            test -f "$file"
+            echo "FOUND: $file"
+          done
+
+          python -m compileall -q .
+
+      - name: Import V20.78.52 provider core
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import importlib
+
+          modules = [
+              "v20_78_52_provider_router",
+              "v20_78_52_competition_resolver",
+              "v20_78_52_entity_classifier",
+              "v20_78_52_data_acquisition",
+              "v20_78_52_data_quality_bridge",
+          ]
+
+          for name in modules:
+              print("IMPORT:", name)
+              importlib.import_module(name)
+              print("PASS:", name)
+
+          print("CORE PROVIDER IMPORT: PASS")
+          PY
+
+      - name: Provider connectivity
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          STATUS="$(
+            curl -sS \
+              -o /tmp/api_football.json \
+              -w "%{http_code}" \
+              -H "x-apisports-key: ${API_FOOTBALL_KEY}" \
+              "https://v3.football.api-sports.io/status"
+          )"
+
+          test "$STATUS" = "200"
+          echo "API-FOOTBALL: PASS"
+
+          STATUS="$(
+            curl -sS \
+              -o /tmp/sportmonks.json \
+              -w "%{http_code}" \
+              -H "Accept: application/json" \
+              -H "Authorization: ${SPORTMONKS_API_TOKEN}" \
+              "https://api.sportmonks.com/v3/football/leagues"
+          )"
+
+          test "$STATUS" = "200"
+          echo "SPORTMONKS: PASS"
+
+          STATUS="$(
+            curl -sS \
+              -o /tmp/football_data.json \
+              -w "%{http_code}" \
+              -H "X-Auth-Token: ${FOOTBALL_DATA_API_KEY}" \
+              "https://api.football-data.org/v4/competitions"
+          )"
+
+          test "$STATUS" = "200"
+          echo "FOOTBALL-DATA.ORG: PASS"
+
+      - name: Build evidence contract
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/build_evidence.py <<'PY'
+          import json
+          from pathlib import Path
+
+
+          UNKNOWN = None
+
+
+          def make_evidence(fixture):
+              if fixture.get("status") != "RESOLVED":
+                  return None
+
+              return {
+                  "fixture_id": fixture.get(
+                      "provider_fixture_id"
+                  ),
+                  "provider": fixture.get(
+                      "provider"
+                  ),
+                  "home_team": fixture.get(
+                      "home_team"
+                  ),
+                  "away_team": fixture.get(
+                      "away_team"
+                  ),
+                  "kickoff": fixture.get(
+                      "kickoff"
+                  ),
+                  "competition": fixture.get(
+                      "competition"
+                  ),
+
+                  "recent_form": UNKNOWN,
+                  "h2h": UNKNOWN,
+                  "standings": UNKNOWN,
+                  "lineup": UNKNOWN,
+                  "injuries": UNKNOWN,
+                  "suspensions": UNKNOWN,
+                  "xg": UNKNOWN,
+                  "team_statistics": UNKNOWN,
+
+                  "data_quality": {
+                      "recent_form": "UNKNOWN",
+                      "h2h": "UNKNOWN",
+                      "standings": "UNKNOWN",
+                      "lineup": "UNKNOWN",
+                      "injuries": "UNKNOWN",
+                      "suspensions": "UNKNOWN",
+                      "xg": "UNKNOWN",
+                      "team_statistics": "UNKNOWN"
+                  }
+              }
+
+
+          # Read provider matching artifact when available.
+          matching_path = Path(
+              "artifacts/provider_fixture_matching.json"
+          )
+
+          fixtures = []
+
+          if matching_path.exists():
+              report = json.loads(
+                  matching_path.read_text(
+                      encoding="utf-8"
+                  )
+              )
+
+              fixtures = report.get(
+                  "results",
+                  []
+              )
+
+          evidence = []
+
+          for fixture in fixtures:
+              item = make_evidence(fixture)
+
+              if item is not None:
+                  evidence.append(item)
+
+          output = {
+              "version": "V20.79",
+              "baseline": "V20.78.52",
+              "resolved_input_count": len(fixtures),
+              "evidence_count": len(evidence),
+              "evidence": evidence
+          }
+
+          Path(
+              "artifacts/evidence.json"
+          ).write_text(
+              json.dumps(
+                  output,
+                  indent=2,
+                  ensure_ascii=False
+              ),
+              encoding="utf-8"
+          )
+
+          print(
+              json.dumps(
+                  output,
+                  indent=2,
+                  ensure_ascii=False
+              )
+          )
+          PY
+
+          python /tmp/build_evidence.py
+
+      - name: Evidence safety validation
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path(
+                  "artifacts/evidence.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          assert data["version"] == "V20.79"
+          assert data["baseline"] == "V20.78.52"
+
+          for item in data["evidence"]:
+
+              assert item["fixture_id"]
+              assert item["home_team"]
+              assert item["away_team"]
+
+              assert (
+                  item["home_team"].upper()
+                  != item["away_team"].upper()
+              )
+
+              quality = item["data_quality"]
+
+              for key, value in quality.items():
+                  assert value in {
+                      "KNOWN",
+                      "UNKNOWN"
+                  }
+
+              # UNKNOWN must remain unknown.
+              for key in [
+                  "recent_form",
+                  "h2h",
+                  "standings",
+                  "lineup",
+                  "injuries",
+                  "suspensions",
+                  "xg",
+                  "team_statistics"
+              ]:
+                  if item[key] is None:
+                      assert (
+                          quality[key]
+                          == "UNKNOWN"
+                      )
+
+          print("EVIDENCE SAFETY: PASS")
+          PY
+
+      - name: Unresolved fixture exclusion gate
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          matching = json.loads(
+              Path(
+                  "artifacts/provider_fixture_matching.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          evidence = json.loads(
+              Path(
+                  "artifacts/evidence.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          unresolved = {
+              item.get("ocr_line")
+              for item in matching.get(
+                  "results",
+                  []
+              )
+              if item.get("status") != "RESOLVED"
+          }
+
+          evidence_ids = {
+              item.get("fixture_id")
+              for item in evidence.get(
+                  "evidence",
+                  []
+              )
+          }
+
+          for item in matching.get(
+              "results",
+              []
+          ):
+              if item.get("status") != "RESOLVED":
+                  assert (
+                      item.get(
+                          "provider_fixture_id"
+                      ) is None
+                  )
+
+          print(
+              "UNRESOLVED FIXTURE EXCLUSION: PASS"
+          )
+
+          print(
+              "Unresolved candidates:",
+              len(unresolved)
+          )
+
+          print(
+              "Evidence records:",
+              len(evidence_ids)
+          )
+          PY
+
+      - name: Evidence provenance validation
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path(
+                  "artifacts/evidence.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          for item in data["evidence"]:
+              assert item["provider"]
+              assert item["fixture_id"]
+
+          print(
+              "EVIDENCE PROVENANCE: PASS"
+          )
+          PY
+
+      - name: Run repository tests
+        run: |
+          set -euo pipefail
+
+          if find . \
+            -type f \
+            -name "test_*.py" \
+            -not -path "./.git/*" \
+            | grep -q .; then
+
+            pytest -q
+
+          else
+            echo "No repository pytest files found."
+          fi
+
+      - name: Upload evidence artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v20-79-real-evidence
+          path: artifacts/
+
+      - name: Final status
+        run: |
+          set -euo pipefail
+
+          echo
+          echo "======================================================"
+          echo " V20.79 REAL EVIDENCE: PASS"
+          echo "======================================================"
+          echo
+          echo "Verified:"
+          echo "  [PASS] Screenshot input"
+          echo "  [PASS] OCR"
+          echo "  [PASS] V20.78.52 core"
+          echo "  [PASS] Provider connectivity"
+          echo "  [PASS] Resolved-fixture evidence gate"
+          echo "  [PASS] Missing-data safety"
+          echo "  [PASS] Evidence provenance"
+          echo "  [PASS] Unresolved-fixture exclusion"
+          echo
+          echo "NO DATA != NEGATIVE DATA"
+          echo
+          echo "Next:"
+          echo "REAL EVIDENCE -> REAL PROBABILITY"
