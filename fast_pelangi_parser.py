@@ -57,19 +57,22 @@ def _repair_team(s:str)->str:
     return s
 
 def _parse_total_line(raw):
-    raw=clean(raw).replace(' ','').replace(',', '.')
-    raw=raw.replace('¼','1/4').replace('½','1/2').replace('¾','3/4')
-    # OCR may render quarter totals as 3.25, 3/4, or 3¾.
-    m=re.search(r'([0-9]+)(?:\.([0-9]+)|/([24]))$', raw)
-    if not m:
-        return None
-    try:
+    raw=clean(raw).replace(',', '.')
+    raw=raw.replace('¼',' 1/4').replace('½',' 1/2').replace('¾',' 3/4')
+    raw=re.sub(r'\s+',' ',raw).strip()
+    m=re.search(r'([0-9]+)\s*(?:(1/4|1/2|3/4)|\.([0-9]+))$', raw)
+    if m:
         whole=int(m.group(1))
-        if m.group(2) is not None:
-            return float(f"{whole}.{m.group(2)}")
-        return whole + (1/int(m.group(3)))
-    except Exception:
-        return None
+        if m.group(2):
+            return whole + {'1/4':0.25,'1/2':0.5,'3/4':0.75}[m.group(2)]
+        return float(f"{whole}.{m.group(3)}")
+    m=re.search(r'([0-9]+)\s*/\s*([24])$', raw)
+    if m:
+        return int(m.group(1)) + 1/int(m.group(2))
+    m=re.fullmatch(r'[0-9]+(?:\.0+)?', raw)
+    if m:
+        return float(raw)
+    return None
 
 def _parse_hdp_line(raw):
     raw=clean(raw).replace('O:','0:').replace('o:','0:').replace(' ','')
@@ -85,7 +88,6 @@ def _parse_hdp_line(raw):
         return whole+frac
     except Exception:
         return None
-
 class FastPelangiParser:
     def __init__(self,min_conf=12): self.min_conf=min_conf
 
