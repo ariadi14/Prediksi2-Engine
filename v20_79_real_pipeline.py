@@ -201,10 +201,19 @@ def main() -> int:
 
         resolved, validation = pipeline.resolve_fixture(fixture)
         if validation.get("status") != "VALID":
+            diagnostics = []
+            for provider in getattr(pipeline, "providers", []):
+                diag = getattr(provider, "_last_fixture_lookup", None)
+                if diag:
+                    diagnostics.append({
+                        "provider": getattr(provider, "name", "unknown"),
+                        **diag,
+                    })
             unresolved.append({
                 "fixture": fixture,
                 "reason": validation.get("reason", "FIXTURE_REJECTED"),
                 "validation": validation,
+                "provider_diagnostics": diagnostics,
             })
             continue
 

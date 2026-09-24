@@ -94,10 +94,23 @@ class APIFootballProvider:
                 if page >= total_pages or not rows: break
                 page += 1
             cache[date] = rows_all
+            self._last_fixture_error = None
+            self._last_fixture_lookup = {
+                'date': date,
+                'rows': len(rows_all),
+                'pages': page,
+                'error': None,
+            }
             return rows_all
         except Exception as ex:
             cache[date] = rows_all
             self._last_fixture_error = str(ex)[:300]
+            self._last_fixture_lookup = {
+                'date': date,
+                'rows': len(rows_all),
+                'pages': page,
+                'error': self._last_fixture_error,
+            }
             return rows_all
 
     @staticmethod
@@ -139,6 +152,18 @@ class APIFootballProvider:
                     'home_score': round(home_score, 1), 'away_score': round(away_score, 1),
                 }))
         scored.sort(key=lambda x: x[0], reverse=True)
+        self._last_fixture_lookup = dict(getattr(self, '_last_fixture_lookup', {}))
+        self._last_fixture_lookup.update({
+            'requested_home': home,
+            'requested_away': away,
+            'candidate_count': len(scored),
+            'best_home_score': scored[0][1]['home_score'] if scored else None,
+            'best_away_score': scored[0][1]['away_score'] if scored else None,
+            'best_fixture_id': scored[0][1]['fixture_id'] if scored else None,
+            'best_home_name': scored[0][1]['home_name'] if scored else None,
+            'best_away_name': scored[0][1]['away_name'] if scored else None,
+            'best_competition': scored[0][1]['competition'] if scored else None,
+        })
         return [scored[0][1]] if scored else []
 
     def resolve_team(self,name):
