@@ -82,15 +82,23 @@ class APIFootballProvider:
             cache = {}
             self._fixture_date_cache = cache
         if date in cache: return cache[date]
+        rows_all = []
         try:
-            d = self.http.get('/fixtures', {'date': date})
-            rows = d.get('response', []) if isinstance(d, dict) else []
-            cache[date] = rows
-            return rows
+            page = 1
+            while True:
+                d = self.http.get('/fixtures', {'date': date, 'timezone': 'Asia/Jakarta', 'page': page})
+                rows = d.get('response', []) if isinstance(d, dict) else []
+                rows_all.extend(rows)
+                paging = d.get('paging', {}) if isinstance(d, dict) else {}
+                total_pages = int(paging.get('total') or page)
+                if page >= total_pages or not rows: break
+                page += 1
+            cache[date] = rows_all
+            return rows_all
         except Exception as ex:
-            cache[date] = []
+            cache[date] = rows_all
             self._last_fixture_error = str(ex)[:300]
-            return []
+            return rows_all
 
     @staticmethod
     def _norm_fixture_team(value):
