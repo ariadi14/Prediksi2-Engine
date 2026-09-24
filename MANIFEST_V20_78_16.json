@@ -1,0 +1,40 @@
+{
+  "version": "V20.78.16",
+  "base": "V20.78.7",
+  "modules": [
+    "v20_78_6_adaptive_weights.py",
+    "v20_78_probability_engine.py",
+    "v20_78_11_competition_model.py",
+    "v20_78_8_market_decision.py",
+    "test_v20_78_6.py",
+    "v20_78_7_consistency.py",
+    "test_v20_78_7.py",
+    "v20_78_14_backtest.py",
+    "v20_78_13_odds_signal.py",
+    "v20_78_9_correlation.py",
+    "v20_78_16_decision_engine.py",
+    "v20_78_adaptive_pipeline.py",
+    "test_v20_78_3_live_providers.py",
+    "v20_78_3_live_providers.py",
+    "v20_78_evidence_collector.py",
+    "test_v20_78_4.py",
+    "v20_78_12_sensitivity.py",
+    "test_v20_78_5.py",
+    "v20_78_5_market_models.py",
+    "v20_78_4_ensemble.py",
+    "v20_78_10_parlay_optimizer.py",
+    "v20_78_15_learning.py",
+    "test_v20_78_8_to_16.py"
+  ],
+  "features": [
+    "market decision",
+    "correlation-aware selection",
+    "parlay optimizer",
+    "competition model",
+    "sensitivity",
+    "odds signal",
+    "walk-forward backtest",
+    "learning",
+    "full decision engine"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "release": "V20.78.50",
+  "from": "V20.78.39",
+  "modules": [
+    "40_provider_connectivity",
+    "41_real_fixture_resolver",
+    "42_real_evidence",
+    "43_real_probability",
+    "44_real_replay_checkpoint",
+    "45_historical_validation",
+    "46_batch_validation",
+    "47_stress_test",
+    "48_calibration",
+    "49_parlay_validation",
+    "50_production_gate"
+  ],
+  "code_tests": "PASS",
+  "real_data_verified": false,
+  "production_ready": false
+}

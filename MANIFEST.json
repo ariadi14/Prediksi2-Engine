@@ -1,0 +1,11 @@
+{
+  "version": "V20.78.5",
+  "name": "Dedicated O/U & HDP Models",
+  "sha256": "de9b89722742a0d77155e84a6a4a8defd0d8766e43d17903123411cf013ec8c3",
+  "qa": "PASS",
+  "tests": [
+    "V20_78_5_DEDICATED_OU_HDP_TEST_PASS",
+    "V20_78_4_TEST_PASS",
+    "LIVE_PROVIDER_TEST_PASS"
+  ]
+}

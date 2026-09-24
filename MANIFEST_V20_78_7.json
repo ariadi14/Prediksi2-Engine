@@ -1,0 +1,12 @@
+{
+  "version": "V20.78.7",
+  "features": [
+    "cross_model_consistency",
+    "predictive_entropy",
+    "uncertainty_score",
+    "dynamic_weights",
+    "calibration",
+    "dedicated_ou",
+    "dedicated_hdp"
+  ]
+}
