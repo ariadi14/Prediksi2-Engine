@@ -206,6 +206,10 @@ def main() -> int:
     results = []
     unresolved = []
     seen_fixture_keys = set()
+    provider_resolved = 0
+    time_window_matches = 0
+    evidence_enriched = 0
+    probability_calculated = 0
 
     for fixture in fixtures:
         if not fixture.get("home") or not fixture.get("away"):
@@ -230,6 +234,8 @@ def main() -> int:
             })
             continue
 
+        provider_resolved += 1
+        resolved["provider_resolution_mode"] = validation.get("match_mode")
         resolved_key = "|".join(str(resolved.get(k, "")) for k in (
             "competition", "home_canonical", "away_canonical", "match_date", "kickoff"
         ))
@@ -243,6 +249,7 @@ def main() -> int:
             continue
         if not in_window(resolved_kickoff, args.time_window):
             continue
+        time_window_matches += 1
 
         provider_evidence = pipeline.ev.fetch(resolved)
         if provider_evidence.get("status") != "ENRICHED":
@@ -252,6 +259,7 @@ def main() -> int:
                 "validation": validation,
             })
             continue
+        evidence_enriched += 1
 
         visible = resolved.get("markets") or []
         ev_payload = dict(provider_evidence.get("payload") or {})
@@ -276,6 +284,7 @@ def main() -> int:
                 "prediction": prediction,
             })
             continue
+        probability_calculated += 1
 
         evaluated = evaluate_markets(prediction, visible)
         for candidate in evaluated:
@@ -343,6 +352,10 @@ def main() -> int:
         "counts": {
             "input_screenshots": len(screenshots),
             "parsed_fixtures": len(fixtures),
+            "provider_resolved_fixtures": provider_resolved,
+            "time_window_matches": time_window_matches,
+            "evidence_enriched_fixtures": evidence_enriched,
+            "probability_calculated_fixtures": probability_calculated,
             "resolved_fixtures": len(results),
             "unresolved_fixtures": len(unresolved),
             "qualified_markets": len(candidates),

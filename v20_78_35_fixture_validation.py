@@ -8,5 +8,17 @@ def validate_fixture(f, candidate, min_team=90, min_comp=55):
     a=fuzz.ratio(norm_name(f.get('away_canonical') or f.get('away','')), norm_name(candidate.get('away_name','')))
     c=fuzz.ratio(norm_name(f.get('competition','')), norm_name(candidate.get('competition',''))) if f.get('competition') and candidate.get('competition') else 100
     d=1 if not f.get('match_date') or not candidate.get('date') or str(f['match_date'])==str(candidate['date']) else 0
-    ok=h>=min_team and a>=min_team and c>=min_comp and d==1
-    return {'status':'VALID' if ok else 'REJECTED','home_score':round(h,1),'away_score':round(a,1),'competition_score':round(c,1),'date_ok':bool(d),'fixture_id':candidate.get('fixture_id')}
+    mode = candidate.get('match_mode')
+    one_sided_ok = (
+        mode in ('STRONG_HOME_ONLY', 'STRONG_AWAY_ONLY')
+        and bool(candidate.get('unique_match'))
+        and d == 1
+        and c >= min_comp
+        and (h >= 92 or a >= 92)
+    )
+    ok=(h>=min_team and a>=min_team and c>=min_comp and d==1) or one_sided_ok
+    return {'status':'VALID' if ok else 'REJECTED',
+            'home_score':round(h,1),'away_score':round(a,1),
+            'competition_score':round(c,1),'date_ok':bool(d),
+            'fixture_id':candidate.get('fixture_id'),
+            'match_mode':mode,'unique_match':bool(candidate.get('unique_match'))}
