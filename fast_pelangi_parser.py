@@ -12,6 +12,7 @@ from pytesseract import Output
 from rapidfuzz import fuzz
 
 ODDS_RE=re.compile(r'(?<!\d)(\d{1,2}[.,]\d{1,3})(?!\d)')
+TIME_RE=re.compile(r'\b([01]?\d|2[0-3]):([0-5]\d)\b')
 DRAW_WORDS={'draw','drow','drawn','braw'}
 
 def clean(s):
@@ -55,17 +56,38 @@ def _repair_team(s:str)->str:
     s = replacements.get(s,s)
     return s
 
+def _parse_total_line(raw):
+    raw=clean(raw).replace(',', '.')
+    raw=raw.replace('¼',' 1/4').replace('½',' 1/2').replace('¾',' 3/4')
+    raw=re.sub(r'\s+',' ',raw).strip()
+    m=re.search(r'([0-9]+)\s*(?:(1/4|1/2|3/4)|\.([0-9]+))$', raw)
+    if m:
+        whole=int(m.group(1))
+        if m.group(2):
+            return whole + {'1/4':0.25,'1/2':0.5,'3/4':0.75}[m.group(2)]
+        return float(f"{whole}.{m.group(3)}")
+    m=re.search(r'([0-9]+)\s*/\s*([24])$', raw)
+    if m:
+        return int(m.group(1)) + 1/int(m.group(2))
+    m=re.fullmatch(r'[0-9]+(?:\.0+)?', raw)
+    if m:
+        return float(raw)
+    return None
+
 def _parse_hdp_line(raw):
     raw=clean(raw).replace('O:','0:').replace('o:','0:').replace(' ','')
     m=re.search(r'0[:.]([0-9]+)(?:([0-9])/(2|4)|/([24]))$',raw)
-    if not m:return None
+    if not m:
+        return None
     try:
         whole=int(m.group(1))
-        if m.group(4): frac=1/int(m.group(4))
-        else: frac=int(m.group(2))/int(m.group(3))
+        if m.group(4):
+            frac=1/int(m.group(4))
+        else:
+            frac=int(m.group(2))/int(m.group(3))
         return whole+frac
-    except Exception:return None
-
+    except Exception:
+        return None
 class FastPelangiParser:
     def __init__(self,min_conf=12): self.min_conf=min_conf
 
@@ -114,7 +136,7 @@ class FastPelangiParser:
         left=self._data(path,0,430,y1=220); right=self._data(path,410,690,y1=220)
         left['top']=left['top']/2+220; left['left']=left['left']/2
         right['top']=right['top']/2+220; right['left']=right['left']/2+410
-        df=right; lines=self._left_lines(left); comp=self._top_header(path) or carry or 'UNKNOWN'; rows=[]; pending=[]
+        df=right; lines=self._left_lines(left); comp=self._top_header(path) or carry or 'UNKNOWN'; rows=[]; pending=[]; pending_kickoff=None
         for y,text in lines:
             if _is_header(text):
                 comp=text; pending=[]; continue
@@ -146,11 +168,24 @@ class FastPelangiParser:
                         if ':' in t or re.search(r'\d',t): htexts.append(t)
                 if htexts: hline=_parse_hdp_line(' '.join(htexts))
                 markets=[]
+                ou=vals(505,610)
+                outexts=[]
+                for _,r in df.iterrows():
+                    if 505<=r.left<610 and gy-75<=r.top<=gy+10:
+                        t=clean(str(r.text))
+                        if t:
+                            outexts.append(t)
+                ouline=_parse_total_line(' '.join(outexts))
+                if ouline is not None:
+                    ou=[x for x in ou if abs(x[0]-ouline)>1e-9]
+                if ouline is not None and len(ou)>=2:
+                    for sel,(od,_) in zip(('Over','Under'),ou[:2]):
+                        markets.append({'market':'O/U','selection':sel,'line':ouline,'odds':od})
                 if len(one)>=3:
                     for sel,(od,_) in zip(('Home','Draw','Away'),one[:3]): markets.append({'market':'1X2','selection':sel,'line':None,'odds':od})
                 if len(hdp)>=2:
                     for sel,(od,_) in zip(('Home','Away'),hdp[:2]): markets.append({'market':'HDP','selection':sel,'line':hline,'odds':od})
-                rows.append({'competition':comp,'home':home,'away':away,'kickoff':None,'match_date':None,'markets':markets,'image_id':h12(path),'parse_warnings':['KICKOFF_UNREADABLE_SOURCE_CROP','MATCH_DATE_NOT_VISIBLE']})
+                rows.append({'competition':comp,'home':home,'away':away,'kickoff':pending_kickoff,'match_date':None,'markets':markets,'image_id':h12(path),'parse_warnings':['KICKOFF_UNREADABLE_SOURCE_CROP','MATCH_DATE_NOT_VISIBLE']})
                 pending=[]
             else:
                 if text and not _is_header(text) and nt not in DRAW_WORDS and len(text)>=2:

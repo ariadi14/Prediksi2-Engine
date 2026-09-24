@@ -1,0 +1,188 @@
+name: V20.79 - FINAL REAL PIPELINE
+
+on:
+  workflow_dispatch:
+    inputs:
+      screenshot_path:
+        description: "Path screenshot PelangiEuro yang sudah di-upload ke repository"
+        required: true
+        type: string
+      time_window:
+        description: "Filter waktu manual"
+        required: true
+        default: "00:00-05:00"
+        type: choice
+        options:
+          - "18:00-21:00"
+          - "21:00-00:00"
+          - "00:00-05:00"
+          - "05:00-10:00"
+      minimum_probability:
+        description: "Minimum model probability"
+        required: true
+        default: "0.55"
+        type: string
+      minimum_ev:
+        description: "Minimum EV (0.02 = +2%)"
+        required: true
+        default: "0.02"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  final-real-pipeline:
+    runs-on: ubuntu-latest
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install             pillow             pytesseract             rapidfuzz             numpy             pandas             scipy             scikit-learn             pytest
+
+      - name: Install OCR engine
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          tesseract --version
+
+      - name: Validate provider credential
+        run: |
+          set -euo pipefail
+          test -n "${API_FOOTBALL_KEY:-}" || {
+            echo "ERROR: API_FOOTBALL_KEY GitHub Secret belum tersedia."
+            exit 1
+          }
+          echo "API-FOOTBALL SECRET: PRESENT"
+
+      - name: Validate screenshot input
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+          test -f "$SCREENSHOT_PATH" || {
+            echo "ERROR: screenshot tidak ditemukan: $SCREENSHOT_PATH"
+            echo "Upload screenshot PelangiEuro ke repository terlebih dahulu."
+            exit 1
+          }
+
+          python - "$SCREENSHOT_PATH" <<'PY'
+          import sys
+          from PIL import Image
+          image = Image.open(sys.argv[1])
+          print("FORMAT:", image.format)
+          print("SIZE:", image.size)
+          print("MODE:", image.mode)
+          assert image.width > 0 and image.height > 0
+          print("SCREENSHOT VALIDATION: PASS")
+          PY
+
+      - name: Python syntax and import gate
+        run: |
+          set -euo pipefail
+          python -m compileall -q .
+          python - <<'PY'
+          import fast_pelangi_parser
+          import v20_78_3_live_providers
+          import v20_78_35_fixture_validation
+          import v20_78_39_provider_aware_pipeline
+          import v20_78_43_real_probability
+          import v20_79_real_pipeline
+          print("V20.79 CORE IMPORT: PASS")
+          PY
+
+      - name: Run regression tests
+        run: |
+          set -euo pipefail
+          pytest -q test_v20_79_real_pipeline.py
+          echo "V20.79 REGRESSION TESTS: PASS"
+
+      - name: Run FINAL REAL pipeline
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+          TIME_WINDOW: ${{ inputs.time_window }}
+          MIN_PROBABILITY: ${{ inputs.minimum_probability }}
+          MIN_EV: ${{ inputs.minimum_ev }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+
+          python v20_79_real_pipeline.py             --screenshot "$SCREENSHOT_PATH"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --output artifacts/v20_79_final_output.json
+
+      - name: Validate FINAL output safety
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path("artifacts/v20_79_final_output.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+
+          assert data["engine_version"] == "V20.79"
+          assert data["source"] == "PelangiEuro"
+          assert data["time_filter_mode"] == "MANUAL"
+          assert data["market_source_locked"] is True
+          assert data["no_forced_quota"] is True
+
+          for item in data.get("candidates", []):
+              assert item["source_market_locked"] is True
+              assert item["qualified"] is True
+              assert item["fixture_id"]
+              assert item["model_probability"] >= data["thresholds"]["minimum_probability"]
+              assert item["ev"] >= data["thresholds"]["minimum_ev"]
+
+          for item in data.get("unresolved", []):
+              assert item.get("reason")
+
+          print("FINAL OUTPUT SAFETY: PASS")
+          print()
+          print("Counts:", data["counts"])
+          print("5-leg candidates:", len(data["candidate_parlay_5"]))
+          print("7-leg candidates:", len(data["candidate_parlay_7"]))
+          PY
+
+      - name: Publish final artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v20-79-final-real-pipeline
+          path: artifacts/v20_79_final_output.json
+
+      - name: FINAL status
+        run: |
+          set -euo pipefail
+          echo
+          echo "======================================================"
+          echo " V20.79 FINAL REAL PIPELINE: PASS"
+          echo "======================================================"
+          echo
+          echo "SCREENSHOT"
+          echo "  -> OCR / PARSER"
+          echo "  -> MANUAL TIME FILTER"
+          echo "  -> REAL FIXTURE RESOLUTION"
+          echo "  -> REAL PROVIDER EVIDENCE"
+          echo "  -> REAL PROBABILITY"
+          echo "  -> EXACT SOURCE MARKET/LINE/ODDS"
+          echo "  -> ASIAN-LINE EV"
+          echo "  -> QUALIFICATION"
+          echo "  -> 5/7 CANDIDATE PARLAY"
+          echo
+          echo "No forced quota."
+          echo "No invented market."
+          echo "No invented fixture."
+          echo "No hard-coded production probability."
+          echo "======================================================"
