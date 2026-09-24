@@ -75,36 +75,71 @@ class APIFootballProvider:
         except Exception:
             return []
 
-    def find_fixture(self,fixture):
-        """Find candidate fixtures; date is preferred, team-id schedule is fallback."""
-        home=fixture.get('home_canonical') or fixture.get('home'); away=fixture.get('away_canonical') or fixture.get('away')
-        hp=fixture.get('home_provider_ids',{}).get('api-football')
-        date=fixture.get('match_date')
+    def _fixtures_for_date(self, date):
+        if not date: return []
+        cache = getattr(self, '_fixture_date_cache', None)
+        if cache is None:
+            cache = {}
+            self._fixture_date_cache = cache
+        if date in cache: return cache[date]
+        rows_all = []
         try:
-            params={'date':date} if date else ({'team':hp,'next':50} if hp else None)
-            if not params:return []
-            d=self.http.get('/fixtures',params)
-            rows=d.get('response',[]) if isinstance(d,dict) else []
-            def n(x):
-                import unicodedata,re
-                x=unicodedata.normalize('NFKD',str(x or '')); x=''.join(c for c in x if not unicodedata.combining(c)); return re.sub(r'[^a-z0-9]','',x.lower())
-            hn,an=n(home),n(away); out=[]
-            for f in rows:
-                h=f.get('teams',{}).get('home',{}); a=f.get('teams',{}).get('away',{})
-                if (n(h.get('name'))==hn or h.get('id')==hp) and n(a.get('name'))==an:
-                    fixture_date=str(f.get('fixture',{}).get('date',''))
-                kickoff_wib=None
+            page = 1
+            while True:
+                d = self.http.get('/fixtures', {'date': date, 'timezone': 'Asia/Jakarta', 'page': page})
+                rows = d.get('response', []) if isinstance(d, dict) else []
+                rows_all.extend(rows)
+                paging = d.get('paging', {}) if isinstance(d, dict) else {}
+                total_pages = int(paging.get('total') or page)
+                if page >= total_pages or not rows: break
+                page += 1
+            cache[date] = rows_all
+            return rows_all
+        except Exception as ex:
+            cache[date] = rows_all
+            self._last_fixture_error = str(ex)[:300]
+            return rows_all
+
+    @staticmethod
+    def _norm_fixture_team(value):
+        import unicodedata, re
+        x = unicodedata.normalize('NFKD', str(value or ''))
+        x = ''.join(c for c in x if not unicodedata.combining(c))
+        return re.sub(r'[^a-z0-9]', '', x.lower())
+
+    def find_fixture(self, fixture):
+        home = fixture.get('home_canonical') or fixture.get('home')
+        away = fixture.get('away_canonical') or fixture.get('away')
+        date = fixture.get('match_date')
+        if not home or not away or not date: return []
+        rows = self._fixtures_for_date(date)
+        hn, an = self._norm_fixture_team(home), self._norm_fixture_team(away)
+        from rapidfuzz import fuzz
+        scored = []
+        for f in rows:
+            h = f.get('teams', {}).get('home', {})
+            a = f.get('teams', {}).get('away', {})
+            hs, aws = self._norm_fixture_team(h.get('name')), self._norm_fixture_team(a.get('name'))
+            home_score, away_score = fuzz.ratio(hn, hs), fuzz.ratio(an, aws)
+            if home_score >= 82 and away_score >= 82:
+                fixture_date = str((f.get('fixture') or {}).get('date', ''))
+                kickoff_wib = None
                 try:
-                    from datetime import datetime, timezone
+                    from datetime import datetime
                     from zoneinfo import ZoneInfo
-                    dt=datetime.fromisoformat(fixture_date.replace('Z','+00:00'))
-                    kickoff_wib=dt.astimezone(ZoneInfo('Asia/Jakarta')).strftime('%Y-%m-%dT%H:%M:%S%z')
-                except Exception:
-                    pass
-                out.append({'fixture_id':f.get('fixture',{}).get('id'),'home_name':h.get('name'),'away_name':a.get('name'),'date':fixture_date[:10],'kickoff_utc':fixture_date,'kickoff_wib':kickoff_wib,'competition':(f.get('league') or {}).get('name')})
-            return out
-        except Exception:
-            return []
+                    dt = datetime.fromisoformat(fixture_date.replace('Z', '+00:00'))
+                    kickoff_wib = dt.astimezone(ZoneInfo('Asia/Jakarta')).strftime('%Y-%m-%dT%H:%M:%S%z')
+                except Exception: pass
+                scored.append((home_score + away_score, {
+                    'fixture_id': (f.get('fixture') or {}).get('id'),
+                    'home_name': h.get('name'), 'away_name': a.get('name'),
+                    'date': fixture_date[:10], 'kickoff_utc': fixture_date,
+                    'kickoff_wib': kickoff_wib,
+                    'competition': (f.get('league') or {}).get('name'),
+                    'home_score': round(home_score, 1), 'away_score': round(away_score, 1),
+                }))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [scored[0][1]] if scored else []
 
     def resolve_team(self,name):
         try:
