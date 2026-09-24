@@ -1,0 +1,56 @@
+name: Sportmonks API Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-sportmonks:
+    runs-on: ubuntu-latest
+    env:
+      SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
+
+    steps:
+      - name: Test Sportmonks API
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SPORTMONKS_API_TOKEN:-}" ]; then
+            echo "SPORTMONKS_API_TOKEN is not configured"
+            exit 1
+          fi
+
+          echo "Calling Sportmonks Football API..."
+
+          HTTP_CODE=$(curl -sS -o /tmp/sportmonks.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${SPORTMONKS_API_TOKEN}" \
+            -H "Accept: application/json" \
+            "https://api.sportmonks.com/v3/football/leagues")
+
+          echo "HTTP status: $HTTP_CODE"
+
+          python - <<'PY'
+          import json
+
+          with open("/tmp/sportmonks.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          print("Response keys:", list(data.keys()))
+
+          if "data" in data:
+              if isinstance(data["data"], list):
+                  print("DATA_COUNT:", len(data["data"]))
+              else:
+                  print("DATA_COUNT: 1")
+
+          if data.get("message"):
+              print("MESSAGE:", data["message"])
+          PY
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Sportmonks API test failed"
+            cat /tmp/sportmonks.json
+            exit 1
+          fi
+
+          echo "Sportmonks API connection: PASS"
