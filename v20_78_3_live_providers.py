@@ -151,7 +151,10 @@ class APIFootballProvider:
             a = f.get('teams', {}).get('away', {})
             hs, aws = self._norm_fixture_team(h.get('name')), self._norm_fixture_team(a.get('name'))
             home_score, away_score = fuzz.ratio(hn, hs), fuzz.ratio(an, aws)
-            if home_score >= 82 and away_score >= 82:
+            strong_both = home_score >= 82 and away_score >= 82
+            strong_home_only = home_score >= 92 and away_score < 82
+            strong_away_only = away_score >= 92 and home_score < 82
+            if strong_both or strong_home_only or strong_away_only:
                 fixture_date = str((f.get('fixture') or {}).get('date', ''))
                 kickoff_wib = None
                 try:
@@ -168,6 +171,13 @@ class APIFootballProvider:
                     'competition': (f.get('league') or {}).get('name'),
                     'home_score': round(home_score, 1), 'away_score': round(away_score, 1),
                 }))
+        strong_single = [x for x in scored if max(x[1]['home_score'], x[1]['away_score']) >= 92 and min(x[1]['home_score'], x[1]['away_score']) < 82]
+        if len(strong_single) == 1:
+            scored = strong_single
+        elif len(strong_single) > 1:
+            strong_double = [x for x in scored if x[1]['home_score'] >= 82 and x[1]['away_score'] >= 82]
+            if strong_double:
+                scored = strong_double
         scored.sort(key=lambda x: x[0], reverse=True)
         self._last_fixture_lookup = dict(getattr(self, '_last_fixture_lookup', {}))
         self._last_fixture_lookup.update({
