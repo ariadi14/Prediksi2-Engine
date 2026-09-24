@@ -36,11 +36,17 @@ jobs:
       - name: Compile Python
         run: |
           set -euo pipefail
-          python -m py_compile \
+          for file in \
             fast_pelangi_parser.py \
             v20_78_3_live_providers.py \
             v20_79_real_pipeline.py \
-            test_v20_79_real_pipeline.py
+            test_v20_79_real_pipeline.py; do
+            echo "Compiling: $file"
+            python -m py_compile "$file" || {
+              echo "FAILED COMPILE: $file"
+              exit 1
+            }
+          done
           echo "V20.79 PYTHON COMPILE: PASS"
 
       - name: Import final pipeline
