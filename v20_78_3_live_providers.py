@@ -165,6 +165,7 @@ class APIFootballProvider:
                     dt = datetime.fromisoformat(fixture_date.replace('Z', '+00:00'))
                     kickoff_wib = dt.astimezone(ZoneInfo('Asia/Jakarta')).strftime('%Y-%m-%dT%H:%M:%S%z')
                 except Exception: pass
+                mode = ('STRONG_BOTH' if strong_both else 'STRONG_HOME_ONLY' if strong_home_only else 'STRONG_AWAY_ONLY')
                 scored.append((home_score + away_score, {
                     'fixture_id': (f.get('fixture') or {}).get('id'),
                     'home_name': h.get('name'), 'away_name': a.get('name'),
@@ -172,8 +173,12 @@ class APIFootballProvider:
                     'kickoff_wib': kickoff_wib,
                     'competition': (f.get('league') or {}).get('name'),
                     'home_score': round(home_score, 1), 'away_score': round(away_score, 1),
+                    'match_mode': mode,
                 }))
         scored.sort(key=lambda x: x[0], reverse=True)
+        unique_match = len(scored) == 1
+        if scored:
+            scored[0][1]['unique_match'] = unique_match
         self._last_fixture_lookup = dict(getattr(self, '_last_fixture_lookup', {}))
         self._last_fixture_lookup.update({
             'requested_home': home,
@@ -185,8 +190,14 @@ class APIFootballProvider:
             'best_home_name': scored[0][1]['home_name'] if scored else None,
             'best_away_name': scored[0][1]['away_name'] if scored else None,
             'best_competition': scored[0][1]['competition'] if scored else None,
+            'best_match_mode': scored[0][1].get('match_mode') if scored else None,
+            'unique_match': unique_match,
         })
-        return [scored[0][1]] if scored else []
+        if not scored:
+            return []
+        if scored[0][1].get('match_mode') != 'STRONG_BOTH' and not unique_match:
+            return []
+        return [scored[0][1]]
 
     def resolve_team(self,name):
         try:
@@ -224,10 +235,13 @@ class APIFootballProvider:
             def norm(s): return ''.join(c.lower() for c in str(s) if c.isalnum())
             hn,an=norm(home),norm(away)
             best=None
-            for f in candidates:
-                h=norm(f.get('teams',{}).get('home',{}).get('name','')); a=norm(f.get('teams',{}).get('away',{}).get('name',''))
-                if h==hn and a==an: best=f; break
-                if (hn in h or h in hn) and (an in a or a in an): best=f
+            if fid and candidates:
+                best=candidates[0]
+            else:
+                for f in candidates:
+                    h=norm(f.get('teams',{}).get('home',{}).get('name','')); a=norm(f.get('teams',{}).get('away',{}).get('name',''))
+                    if h==hn and a==an: best=f; break
+                    if (hn in h or h in hn) and (an in a or a in an): best=f
             if not best:return out
             out['fixture_match']=best; fid=best.get('fixture',{}).get('id')
             if not fid:return out
