@@ -30,7 +30,7 @@ jobs:
 
       - name: Extract V20.78.50 engine
         run: |
-          unzip -o Prediksi2_Engine_V20_78_50_FINAL_VALIDATION_CANDIDATE.zip \
+          unzip -o Prediksi2_Engine_V20_78_50_FINAL_VALIDATION_CANDIDATE_PARSER_REGRESSION_FIX_WITH_WORKFLOW.zip \
             -d engine
 
           echo "=== ENGINE CONTENT ==="
