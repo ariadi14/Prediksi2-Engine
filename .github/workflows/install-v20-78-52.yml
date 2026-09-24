@@ -17,6 +17,30 @@ jobs:
           fetch-depth: 0
           ref: main
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python --version
+          python -m pip --version
+
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+          echo ""
+          echo "====================================="
+          echo "PYTHON TEST ENVIRONMENT: READY"
+          echo "====================================="
+
+          python -m pytest --version
+
       - name: Find V20.78.52 ZIP
         shell: bash
         run: |
@@ -27,7 +51,7 @@ jobs:
           if [ ! -f "$ZIP" ]; then
             echo "ERROR: $ZIP tidak ditemukan."
             echo ""
-            echo "File ZIP yang tersedia:"
+            echo "ZIP yang tersedia:"
             find . -maxdepth 1 -type f -name "*.zip" -print
             exit 1
           fi
@@ -35,6 +59,7 @@ jobs:
           echo "====================================="
           echo "ZIP FOUND"
           echo "====================================="
+
           ls -lh "$ZIP"
 
       - name: Inspect ZIP
@@ -48,10 +73,9 @@ jobs:
 
           unzip -l \
             "Prediksi2_Engine_V20_78_52_GITHUB_READY.zip" \
-            | sed -n '1,160p'
+            | sed -n '1,180p'
 
           echo ""
-          echo "Checking engine directory..."
 
           if ! unzip -l \
               "Prediksi2_Engine_V20_78_52_GITHUB_READY.zip" \
@@ -59,6 +83,8 @@ jobs:
             echo "ERROR: folder engine/ tidak ditemukan."
             exit 1
           fi
+
+          echo "PASS: engine/ ditemukan."
 
       - name: Extract engine safely
         shell: bash
@@ -73,11 +99,13 @@ jobs:
             -d /tmp/prediksi2_extract
 
           if [ ! -d "/tmp/prediksi2_extract/engine" ]; then
-            echo "ERROR: /tmp/prediksi2_extract/engine tidak ditemukan."
+            echo "ERROR: engine directory tidak ditemukan."
             exit 1
           fi
 
-          echo "Engine berhasil diekstrak."
+          echo "====================================="
+          echo "EXTRACTION: PASS"
+          echo "====================================="
 
       - name: Install source only
         shell: bash
@@ -95,7 +123,7 @@ jobs:
             ./
 
           echo ""
-          echo "Source engine berhasil dipasang."
+          echo "Source V20.78.52 berhasil dipasang."
 
       - name: Verify critical V20.78.52 files
         shell: bash
@@ -116,7 +144,9 @@ jobs:
             "test_v20_78_52_provider_router.py"
           )
 
-          echo "Memeriksa file penting..."
+          echo "====================================="
+          echo "SOURCE VERIFICATION"
+          echo "====================================="
 
           for FILE in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "$FILE" ]; then
@@ -128,9 +158,7 @@ jobs:
           done
 
           echo ""
-          echo "====================================="
           echo "V20.78.52 SOURCE VERIFICATION: PASS"
-          echo "====================================="
 
       - name: Verify workflow protection
         shell: bash
@@ -141,15 +169,19 @@ jobs:
           echo "WORKFLOW PROTECTION CHECK"
           echo "====================================="
 
-          if git status --short -- .github/workflows | grep -q .; then
-            echo "WARNING: Ada perubahan workflow."
-            git status --short -- .github/workflows
-          else
-            echo "PASS: Tidak ada perubahan workflow."
+          git status --short -- .github/workflows || true
+
+          # Workflow installer tidak boleh memasukkan workflow baru
+          # dari dalam ZIP.
+          git reset -- .github/workflows || true
+
+          if git diff --name-only -- .github/workflows | grep -q .; then
+            echo "ERROR: terdapat perubahan workflow."
+            git diff --name-only -- .github/workflows
+            exit 1
           fi
 
-          echo ""
-          echo "Workflow directory TIDAK akan diubah oleh installer."
+          echo "PASS: workflow repository terlindungi."
 
       - name: Run V20.78.52 tests
         shell: bash
@@ -178,29 +210,22 @@ jobs:
 
           git add -A
 
-          # Sangat penting:
-          # jangan pernah memasukkan perubahan .github/workflows
-          # ke commit yang dibuat oleh workflow ini.
+          # Jangan pernah memasukkan workflow ke commit installer.
           git reset -- .github/workflows || true
 
           echo "====================================="
           echo "STAGED FILE CHECK"
           echo "====================================="
 
-          if git diff --cached --name-only | grep -E '^\.github/workflows/' >/tmp/workflow_changes.txt; then
-            echo "ERROR: Workflow file masih masuk staged changes:"
-            cat /tmp/workflow_changes.txt
+          WORKFLOW_FILES="$(git diff --cached --name-only -- .github/workflows || true)"
 
-            git reset -- .github/workflows || true
-          fi
-
-          if git diff --cached --name-only | grep -E '^\.github/workflows/' >/tmp/workflow_changes_after_reset.txt; then
-            echo "ERROR: Workflow change masih tersisa setelah reset."
-            cat /tmp/workflow_changes_after_reset.txt
+          if [ -n "$WORKFLOW_FILES" ]; then
+            echo "ERROR: workflow masuk staged changes:"
+            echo "$WORKFLOW_FILES"
             exit 1
           fi
 
-          echo "PASS: Tidak ada workflow yang akan di-commit."
+          echo "PASS: tidak ada workflow yang akan di-commit."
 
       - name: Commit V20.78.52
         shell: bash
@@ -208,8 +233,7 @@ jobs:
           set -euo pipefail
 
           if git diff --cached --quiet; then
-            echo "Tidak ada source baru untuk di-commit."
-            echo "Repository kemungkinan sudah terpasang."
+            echo "Tidak ada perubahan source untuk di-commit."
             exit 0
           fi
 
