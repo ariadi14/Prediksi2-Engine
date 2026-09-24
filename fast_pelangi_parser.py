@@ -11,8 +11,8 @@ import pytesseract
 from pytesseract import Output
 from rapidfuzz import fuzz
 
-ODDS_RE=re.compile(r'(?<!\\d)(\\d{1,2}[.,]\\d{1,3})(?!\\d)')
-TIME_RE=re.compile(r'\\b([01]?\\d|2[0-3]):([0-5]\\d)\\b')
+ODDS_RE=re.compile(r'(?<!\d)(\d{1,2}[.,]\d{1,3})(?!\d)')
+TIME_RE=re.compile(r'\b([01]?\d|2[0-3]):([0-5]\d)\b')
 DRAW_WORDS={'draw','drow','drawn','braw'}
 
 def clean(s):
