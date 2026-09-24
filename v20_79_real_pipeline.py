@@ -120,6 +120,14 @@ def evaluate_markets(prediction: Dict[str, Any], visible: List[Dict[str, Any]]) 
     return out
 
 
+def in_window(hhmm: str, window: str) -> bool:
+    h, m = map(int, hhmm[:5].split(':'))
+    t = h * 60 + m
+    starts = {"18:00-21:00": 1080, "21:00-00:00": 1260, "00:00-05:00": 0, "05:00-10:00": 300}
+    ends = {"18:00-21:00": 1260, "21:00-00:00": 1440, "00:00-05:00": 300, "05:00-10:00": 600}
+    a, b = starts[window], ends[window]
+    return a <= t < b if a < b else (t >= a or t < b)
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--screenshot", required=True)
@@ -161,6 +169,13 @@ def main() -> int:
                 "reason": validation.get("reason", "FIXTURE_REJECTED"),
                 "validation": validation,
             })
+            continue
+
+        resolved_kickoff = resolved.get("kickoff")
+        if not resolved_kickoff:
+            unresolved.append({"fixture": resolved, "reason": "KICKOFF_UNAVAILABLE_AFTER_RESOLUTION"})
+            continue
+        if not in_window(resolved_kickoff, args.time_window):
             continue
 
         provider_evidence = pipeline.ev.fetch(resolved)
@@ -251,6 +266,7 @@ def main() -> int:
         "source": "PelangiEuro",
         "screenshot": str(args.screenshot),
         "time_window": args.time_window,
+        "time_filter_applied_after_provider_resolution": True,
         "time_filter_mode": "MANUAL",
         "market_source_locked": True,
         "no_forced_quota": True,
