@@ -1,0 +1,67 @@
+name: Football Data API Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-football-data:
+    runs-on: ubuntu-latest
+
+    env:
+      FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Test football-data.org API
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          token = os.environ.get("FOOTBALL_DATA_API_KEY")
+
+          if not token:
+              print("ERROR: FOOTBALL_DATA_API_KEY tidak tersedia.")
+              raise SystemExit(1)
+
+          url = "https://api.football-data.org/v4/competitions"
+
+          response = requests.get(
+              url,
+              headers={"X-Auth-Token": token},
+              timeout=30,
+          )
+
+          print("HTTP STATUS:", response.status_code)
+
+          if response.status_code != 200:
+              print("ERROR:", response.text[:500])
+              raise SystemExit(1)
+
+          data = response.json()
+          competitions = data.get("competitions", [])
+
+          print("COMPETITIONS FOUND:", len(competitions))
+
+          for item in competitions[:5]:
+              print(
+                  "-",
+                  item.get("name"),
+                  "|",
+                  item.get("code"),
+                  "|",
+                  item.get("area", {}).get("name"),
+              )
+
+          if not competitions:
+              raise SystemExit(1)
+
+          print("FOOTBALL-DATA.ORG API TEST: PASS")
+          PY
