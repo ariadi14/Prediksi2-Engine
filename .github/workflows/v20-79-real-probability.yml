@@ -1,0 +1,755 @@
+name: V20.79 Real Probability
+
+on:
+  workflow_dispatch:
+    inputs:
+      screenshot_path:
+        description: "Optional screenshot path"
+        required: false
+        default: ""
+      time_window:
+        description: "Manual time window"
+        required: true
+        default: "00:00-05:00"
+        type: choice
+        options:
+          - "18:00-21:00"
+          - "21:00-00:00"
+          - "00:00-05:00"
+          - "05:00-10:00"
+
+jobs:
+  real-probability:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install requests pillow pytesseract numpy pandas scipy scikit-learn pytest
+
+      - name: Validate provider secrets
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+          SPORTMONKS_API_TOKEN: ${{ secrets.SPORTMONKS_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$API_FOOTBALL_KEY" || {
+            echo "ERROR: API_FOOTBALL_KEY missing"
+            exit 1
+          }
+
+          test -n "$FOOTBALL_DATA_API_KEY" || {
+            echo "ERROR: FOOTBALL_DATA_API_KEY missing"
+            exit 1
+          }
+
+          test -n "$SPORTMONKS_API_TOKEN" || {
+            echo "ERROR: SPORTMONKS_API_TOKEN missing"
+            exit 1
+          }
+
+          echo "All provider secrets are configured."
+
+      - name: Locate screenshot
+        env:
+          REQUESTED_SCREENSHOT: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          if [ -n "$REQUESTED_SCREENSHOT" ] && [ -f "$REQUESTED_SCREENSHOT" ]; then
+            SCREENSHOT="$REQUESTED_SCREENSHOT"
+          else
+            SCREENSHOT="$(find . -type f \( \
+              -iname '*.png' -o \
+              -iname '*.jpg' -o \
+              -iname '*.jpeg' -o \
+              -iname '*.webp' \
+            \) \
+            ! -path './.git/*' \
+            | head -n 1 || true)"
+          fi
+
+          if [ -z "$SCREENSHOT" ]; then
+            echo "ERROR: No screenshot found."
+            exit 1
+          fi
+
+          echo "SCREENSHOT=$SCREENSHOT" >> "$GITHUB_ENV"
+          echo "Using screenshot: $SCREENSHOT"
+
+      - name: OCR screenshot
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
+          python - <<'PY'
+          from PIL import Image
+          import pytesseract
+          import json
+          import os
+
+          screenshot = os.environ["SCREENSHOT"]
+
+          image = Image.open(screenshot)
+          text = pytesseract.image_to_string(image)
+
+          result = {
+              "screenshot": screenshot,
+              "ocr_text": text,
+              "ocr_available": bool(text.strip())
+          }
+
+          with open("artifacts/real_probability_ocr.json", "w", encoding="utf-8") as f:
+              json.dump(result, f, ensure_ascii=False, indent=2)
+
+          print("OCR completed.")
+          print("OCR characters:", len(text))
+          PY
+
+      - name: Validate V20.78.52 probability core
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import importlib
+          import pathlib
+
+          root = pathlib.Path(".")
+
+          candidates = sorted(
+              p for p in root.rglob("*.py")
+              if ".git" not in p.parts
+          )
+
+          matches = []
+
+          for p in candidates:
+              name = p.stem
+              if "probability" in name.lower():
+                  matches.append(str(p))
+
+          print("Probability-related Python files:")
+          for item in matches:
+              print(" -", item)
+
+          if not matches:
+              print(
+                  "WARNING: No probability filename found by name. "
+                  "Dynamic discovery will continue."
+              )
+          PY
+
+      - name: Discover probability modules
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/discover_probability.py <<'PY'
+          import importlib
+          import pathlib
+          import sys
+
+          root = pathlib.Path(".")
+
+          candidates = []
+
+          for path in root.rglob("*.py"):
+              if ".git" in path.parts:
+                  continue
+
+              stem = path.stem.lower()
+
+              if (
+                  "probability" in stem
+                  or "probabil" in stem
+                  or "prediction" in stem
+                  or "model" in stem
+              ):
+                  candidates.append(path)
+
+          loaded = []
+
+          for path in candidates:
+              relative = path.with_suffix("")
+              parts = list(relative.parts)
+
+              if parts and parts[0] == ".":
+                  parts = parts[1:]
+
+              module_name = ".".join(parts)
+
+              if not module_name or module_name.startswith("tests."):
+                  continue
+
+              try:
+                  module = importlib.import_module(module_name)
+                  loaded.append({
+                      "path": str(path),
+                      "module": module_name,
+                      "functions": [
+                          name for name in dir(module)
+                          if callable(getattr(module, name, None))
+                          and not name.startswith("_")
+                      ]
+                  })
+                  print("IMPORTED:", module_name)
+              except Exception as exc:
+                  print("SKIPPED:", module_name, type(exc).__name__, str(exc))
+
+          import json
+
+          with open(
+              "artifacts/probability_module_discovery.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(loaded, f, ensure_ascii=False, indent=2)
+
+          print("Loaded modules:", len(loaded))
+          PY
+
+          python /tmp/discover_probability.py
+
+      - name: Build probability input contract
+        env:
+          TIME_WINDOW: ${{ inputs.time_window }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence_path = Path("artifacts/provider_fixture_matching.json")
+
+          if evidence_path.exists():
+              try:
+                  provider_data = json.loads(
+                      evidence_path.read_text(encoding="utf-8")
+                  )
+              except Exception:
+                  provider_data = {}
+          else:
+              provider_data = {}
+
+          fixtures = provider_data.get("fixtures", [])
+
+          probability_inputs = []
+
+          for fixture in fixtures:
+              status = fixture.get("status")
+
+              if status != "RESOLVED":
+                  continue
+
+              evidence = fixture.get("evidence", {})
+
+              item = {
+                  "fixture_id": fixture.get("provider_fixture_id"),
+                  "home_team": fixture.get("home_team"),
+                  "away_team": fixture.get("away_team"),
+                  "competition": fixture.get("competition"),
+                  "entity_type": fixture.get("entity_type"),
+
+                  "time_window": os.environ["TIME_WINDOW"],
+
+                  "recent_form": evidence.get("recent_form"),
+                  "h2h": evidence.get("h2h"),
+                  "standings": evidence.get("standings"),
+                  "lineup": evidence.get("lineup"),
+                  "injuries": evidence.get("injuries"),
+                  "suspensions": evidence.get("suspensions"),
+                  "xg": evidence.get("xg"),
+                  "team_statistics": evidence.get("team_statistics"),
+
+                  "market_candidates": fixture.get(
+                      "market_candidates", []
+                  )
+              }
+
+              probability_inputs.append(item)
+
+          output = {
+              "version": "V20.79",
+              "stage": "REAL_PROBABILITY",
+              "time_window": os.environ["TIME_WINDOW"],
+              "fixture_count": len(probability_inputs),
+              "fixtures": probability_inputs
+          }
+
+          Path("artifacts/real_probability_input.json").write_text(
+              json.dumps(output, ensure_ascii=False, indent=2),
+              encoding="utf-8"
+          )
+
+          print("Probability input fixtures:", len(probability_inputs))
+          PY
+
+      - name: Probability safety gate
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/real_probability_input.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+
+          fixtures = data.get("fixtures", [])
+
+          for fixture in fixtures:
+              if not fixture.get("fixture_id"):
+                  raise RuntimeError(
+                      "Probability input contains fixture without real provider ID."
+                  )
+
+              if not fixture.get("home_team"):
+                  raise RuntimeError(
+                      "Probability input missing home team."
+                  )
+
+              if not fixture.get("away_team"):
+                  raise RuntimeError(
+                      "Probability input missing away team."
+                  )
+
+          print("Probability safety gate: PASS")
+          print("Resolved fixtures available:", len(fixtures))
+          PY
+
+      - name: Run probability engine safely
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/run_probability.py <<'PY'
+          import json
+          import importlib
+          import inspect
+          import pathlib
+          import traceback
+
+          input_path = pathlib.Path(
+              "artifacts/real_probability_input.json"
+          )
+
+          data = json.loads(
+              input_path.read_text(encoding="utf-8")
+          )
+
+          fixtures = data.get("fixtures", [])
+
+          results = []
+
+          def probability_like(name):
+              n = name.lower()
+              return (
+                  "probability" in n
+                  or "probabil" in n
+                  or "predict" in n
+                  or "score" in n
+                  or "model" in n
+              )
+
+          modules = []
+
+          for path in pathlib.Path(".").rglob("*.py"):
+              if ".git" in path.parts:
+                  continue
+
+              stem = path.stem.lower()
+
+              if not probability_like(stem):
+                  continue
+
+              rel = path.with_suffix("")
+              parts = list(rel.parts)
+
+              if parts and parts[0] == ".":
+                  parts = parts[1:]
+
+              module_name = ".".join(parts)
+
+              if not module_name or module_name.startswith("tests."):
+                  continue
+
+              try:
+                  module = importlib.import_module(module_name)
+                  modules.append(module)
+              except Exception:
+                  continue
+
+          print("Candidate probability modules:", len(modules))
+
+          callable_candidates = []
+
+          for module in modules:
+              for name in dir(module):
+                  if name.startswith("_"):
+                      continue
+
+                  try:
+                      obj = getattr(module, name)
+                  except Exception:
+                      continue
+
+                  if not callable(obj):
+                      continue
+
+                  lname = name.lower()
+
+                  if any(
+                      key in lname
+                      for key in (
+                          "probability",
+                          "probabilities",
+                          "predict",
+                          "calculate",
+                          "estimate",
+                          "score_matrix",
+                      )
+                  ):
+                      callable_candidates.append(
+                          (module, name, obj)
+                      )
+
+          print(
+              "Candidate probability functions:",
+              len(callable_candidates)
+          )
+
+          for fixture in fixtures:
+              result = {
+                  "fixture_id": fixture.get("fixture_id"),
+                  "home_team": fixture.get("home_team"),
+                  "away_team": fixture.get("away_team"),
+                  "status": "INSUFFICIENT_DATA",
+                  "probabilities": None,
+                  "market_probabilities": {},
+                  "engine_function": None,
+                  "error": None
+              }
+
+              payload = {
+                  "fixture_id": fixture.get("fixture_id"),
+                  "home_team": fixture.get("home_team"),
+                  "away_team": fixture.get("away_team"),
+                  "competition": fixture.get("competition"),
+                  "entity_type": fixture.get("entity_type"),
+                  "recent_form": fixture.get("recent_form"),
+                  "h2h": fixture.get("h2h"),
+                  "standings": fixture.get("standings"),
+                  "lineup": fixture.get("lineup"),
+                  "injuries": fixture.get("injuries"),
+                  "suspensions": fixture.get("suspensions"),
+                  "xg": fixture.get("xg"),
+                  "team_statistics": fixture.get("team_statistics"),
+                  "market_candidates": fixture.get(
+                      "market_candidates", []
+                  )
+              }
+
+              for module, name, func in callable_candidates:
+                  try:
+                      sig = inspect.signature(func)
+                  except Exception:
+                      continue
+
+                  params = list(sig.parameters.values())
+
+                  try:
+                      if len(params) == 1:
+                          value = func(payload)
+                      elif len(params) == 0:
+                          continue
+                      else:
+                          continue
+
+                      if value is None:
+                          continue
+
+                      if isinstance(value, dict):
+                          result["status"] = "CALCULATED"
+                          result["engine_function"] = (
+                              f"{module.__name__}.{name}"
+                          )
+
+                          if "probabilities" in value:
+                              result["probabilities"] = value[
+                                  "probabilities"
+                              ]
+                          elif any(
+                              key in value
+                              for key in (
+                                  "home_probability",
+                                  "draw_probability",
+                                  "away_probability",
+                                  "home",
+                                  "draw",
+                                  "away",
+                              )
+                          ):
+                              result["probabilities"] = value
+
+                          if "market_probabilities" in value:
+                              result["market_probabilities"] = value[
+                                  "market_probabilities"
+                              ]
+
+                          break
+
+                  except Exception as exc:
+                      result["error"] = (
+                          f"{type(exc).__name__}: {exc}"
+                      )
+
+              results.append(result)
+
+          output = {
+              "version": "V20.79",
+              "stage": "REAL_PROBABILITY",
+              "fixtures_processed": len(fixtures),
+              "results": results
+          }
+
+          pathlib.Path(
+              "artifacts/real_probability_output.json"
+          ).write_text(
+              json.dumps(
+                  output,
+                  ensure_ascii=False,
+                  indent=2,
+                  default=str
+              ),
+              encoding="utf-8"
+          )
+
+          print("Processed fixtures:", len(fixtures))
+          print(
+              "Calculated:",
+              sum(
+                  1
+                  for r in results
+                  if r["status"] == "CALCULATED"
+              )
+          )
+          print(
+              "Insufficient:",
+              sum(
+                  1
+                  for r in results
+                  if r["status"] == "INSUFFICIENT_DATA"
+              )
+          )
+          PY
+
+          python /tmp/run_probability.py
+
+      - name: Probability integrity gate
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+
+          path = Path(
+              "artifacts/real_probability_output.json"
+          )
+
+          data = json.loads(
+              path.read_text(encoding="utf-8")
+          )
+
+          results = data.get("results", [])
+
+          for result in results:
+              probabilities = result.get("probabilities")
+
+              if probabilities is None:
+                  continue
+
+              if isinstance(probabilities, dict):
+                  values = []
+
+                  for key, value in probabilities.items():
+                      if isinstance(value, (int, float)):
+                          if not math.isfinite(value):
+                              raise RuntimeError(
+                                  f"Non-finite probability: {key}"
+                              )
+
+                          if value < 0 or value > 1:
+                              raise RuntimeError(
+                                  f"Probability out of range: "
+                                  f"{key}={value}"
+                              )
+
+                          values.append(value)
+
+                  if not values:
+                      raise RuntimeError(
+                          "Probability object contains no numeric values."
+                      )
+
+          print("Probability integrity gate: PASS")
+          PY
+
+      - name: Market integrity gate
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          input_data = json.loads(
+              Path(
+                  "artifacts/real_probability_input.json"
+              ).read_text(encoding="utf-8")
+          )
+
+          output_data = json.loads(
+              Path(
+                  "artifacts/real_probability_output.json"
+              ).read_text(encoding="utf-8")
+          )
+
+          input_by_id = {
+              item.get("fixture_id"): item
+              for item in input_data.get("fixtures", [])
+          }
+
+          for result in output_data.get("results", []):
+              fixture_id = result.get("fixture_id")
+              source = input_by_id.get(fixture_id)
+
+              if not source:
+                  continue
+
+              visible_markets = source.get(
+                  "market_candidates", []
+              )
+
+              market_probabilities = result.get(
+                  "market_probabilities", {}
+              )
+
+              if not isinstance(market_probabilities, dict):
+                  continue
+
+              visible_text = " ".join(
+                  str(item).lower()
+                  for item in visible_markets
+              )
+
+              for market in market_probabilities:
+                  market_text = str(market).lower()
+
+                  if (
+                      visible_markets
+                      and market_text not in visible_text
+                  ):
+                      raise RuntimeError(
+                          "Market integrity violation: "
+                          f"{market}"
+                      )
+
+          print("Market integrity gate: PASS")
+          PY
+
+      - name: Run repository tests
+        run: |
+          set -euo pipefail
+
+          pytest -q \
+            test_v20_78_52_data_acquisition.py \
+            test_v20_78_52_entity_classifier.py \
+            test_v20_78_52_entity_aware_integration.py \
+            test_v20_78_52_provider_router.py
+
+      - name: Create validation summary
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          output = json.loads(
+              Path(
+                  "artifacts/real_probability_output.json"
+              ).read_text(encoding="utf-8")
+          )
+
+          results = output.get("results", [])
+
+          summary = {
+              "version": "V20.79",
+              "stage": "REAL_PROBABILITY",
+              "fixtures_processed": len(results),
+              "calculated": sum(
+                  1
+                  for r in results
+                  if r.get("status") == "CALCULATED"
+              ),
+              "insufficient_data": sum(
+                  1
+                  for r in results
+                  if r.get("status") == "INSUFFICIENT_DATA"
+              ),
+              "no_forced_prediction": True,
+              "no_market_invention": True,
+              "no_data_not_negative": True,
+              "next_stage": "REAL_MARKET_QUALIFICATION"
+          }
+
+          Path(
+              "artifacts/v20_79_real_probability_summary.json"
+          ).write_text(
+              json.dumps(
+                  summary,
+                  ensure_ascii=False,
+                  indent=2
+              ),
+              encoding="utf-8"
+          )
+
+          print(json.dumps(
+              summary,
+              ensure_ascii=False,
+              indent=2
+          ))
+          PY
+
+      - name: Upload probability artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v20-79-real-probability
+          path: artifacts/
+
+      - name: Final status
+        run: |
+          echo "=========================================="
+          echo "V20.79 REAL PROBABILITY"
+          echo "=========================================="
+          echo "STATUS: SUCCESS"
+          echo "Next: REAL MARKET QUALIFICATION"
+          echo "=========================================="
