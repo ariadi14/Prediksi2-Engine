@@ -153,7 +153,10 @@ class APIFootballProvider:
             a = f.get('teams', {}).get('away', {})
             hs, aws = self._norm_fixture_team(h.get('name')), self._norm_fixture_team(a.get('name'))
             home_score, away_score = fuzz.ratio(hn, hs), fuzz.ratio(an, aws)
-            if home_score >= 82 and away_score >= 82:
+            strong_both = home_score >= 82 and away_score >= 82
+            strong_home_only = home_score >= 92 and away_score < 82
+            strong_away_only = away_score >= 92 and home_score < 82
+            if strong_both or strong_home_only or strong_away_only:
                 fixture_date = str((f.get('fixture') or {}).get('date', ''))
                 kickoff_wib = None
                 try:
