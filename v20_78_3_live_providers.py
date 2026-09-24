@@ -85,14 +85,30 @@ class APIFootballProvider:
         rows_all = []
         try:
             page = 1
+            response_errors = []
             while True:
                 d = self.http.get('/fixtures', {'date': date, 'timezone': 'Asia/Jakarta', 'page': page})
+                if isinstance(d, dict):
+                    response_errors.extend(d.get('errors') or [])
                 rows = d.get('response', []) if isinstance(d, dict) else []
                 rows_all.extend(rows)
                 paging = d.get('paging', {}) if isinstance(d, dict) else {}
                 total_pages = int(paging.get('total') or page)
                 if page >= total_pages or not rows: break
                 page += 1
+            # A second, conservative probe without timezone helps distinguish
+            # a timezone/query issue from a genuinely empty provider day.
+            fallback_rows = []
+            fallback_errors = []
+            if not rows_all:
+                try:
+                    d2 = self.http.get('/fixtures', {'date': date})
+                    fallback_rows = d2.get('response', []) if isinstance(d2, dict) else []
+                    fallback_errors = d2.get('errors') or [] if isinstance(d2, dict) else []
+                except Exception as ex2:
+                    fallback_errors = [str(ex2)[:300]]
+                if fallback_rows:
+                    rows_all = fallback_rows
             cache[date] = rows_all
             self._last_fixture_error = None
             self._last_fixture_lookup = {
@@ -100,6 +116,9 @@ class APIFootballProvider:
                 'rows': len(rows_all),
                 'pages': page,
                 'error': None,
+                'api_errors': response_errors[:10],
+                'fallback_without_timezone_rows': len(fallback_rows),
+                'fallback_without_timezone_errors': fallback_errors[:10],
             }
             return rows_all
         except Exception as ex:
