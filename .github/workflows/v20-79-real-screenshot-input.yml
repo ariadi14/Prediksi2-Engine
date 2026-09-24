@@ -1,0 +1,408 @@
+name: V20.79 - Real Screenshot Input
+
+on:
+  workflow_dispatch:
+    inputs:
+      screenshot_path:
+        description: "Path screenshot PelangiEuro di repository"
+        required: true
+        default: "testdata/screenshots/pelangieuro_test.png"
+        type: string
+
+      time_window:
+        description: "Filter waktu manual"
+        required: true
+        default: "00:00-05:00"
+        type: choice
+        options:
+          - "18:00-21:00"
+          - "21:00-00:00"
+          - "00:00-05:00"
+          - "05:00-10:00"
+
+permissions:
+  contents: read
+
+jobs:
+  real-screenshot-input:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+
+          pip install \
+            pillow \
+            pytesseract \
+            numpy \
+            pandas \
+            scipy \
+            scikit-learn \
+            pytest
+
+      - name: Install OCR engine
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
+          tesseract --version
+
+      - name: Validate screenshot path
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "REAL SCREENSHOT INPUT"
+          echo "=========================================="
+          echo
+          echo "Screenshot:"
+          echo "$SCREENSHOT_PATH"
+          echo
+          echo "Time window:"
+          echo "${{ inputs.time_window }}"
+          echo
+
+          if [ ! -f "$SCREENSHOT_PATH" ]; then
+            echo "ERROR: Screenshot tidak ditemukan."
+            echo
+            echo "Upload screenshot terlebih dahulu ke repository."
+            echo "Contoh:"
+            echo "testdata/screenshots/pelangieuro_test.png"
+            exit 1
+          fi
+
+          echo "Screenshot ditemukan."
+
+      - name: Validate image
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          python - "$SCREENSHOT_PATH" <<'PY'
+          import sys
+          from PIL import Image
+
+          path = sys.argv[1]
+
+          image = Image.open(path)
+
+          print("FORMAT :", image.format)
+          print("SIZE   :", image.size)
+          print("MODE   :", image.mode)
+
+          assert image.width > 0
+          assert image.height > 0
+
+          print("IMAGE VALIDATION: PASS")
+          PY
+
+      - name: OCR screenshot
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          python - "$SCREENSHOT_PATH" <<'PY'
+          import sys
+          from pathlib import Path
+
+          import pytesseract
+          from PIL import Image
+
+          path = sys.argv[1]
+
+          image = Image.open(path)
+
+          text = pytesseract.image_to_string(
+              image,
+              config="--psm 6"
+          )
+
+          output = Path("artifacts/screenshot_ocr.txt")
+          output.write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print("==========================================")
+          print("OCR RESULT")
+          print("==========================================")
+          print(text)
+          print("==========================================")
+
+          if not text.strip():
+              raise SystemExit(
+                  "OCR tidak menghasilkan teks."
+              )
+
+          print("OCR: PASS")
+          PY
+
+      - name: Screenshot market extraction audit
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/audit_market_text.py <<'PY'
+          from pathlib import Path
+          import re
+
+          text = Path(
+              "artifacts/screenshot_ocr.txt"
+          ).read_text(
+              encoding="utf-8"
+          )
+
+          normalized = text.upper()
+
+          print("==========================================")
+          print("SCREENSHOT MARKET AUDIT")
+          print("==========================================")
+
+          market_patterns = [
+              r"\bOVER\s*[0-9]+(?:[.,][0-9]+)?\b",
+              r"\bUNDER\s*[0-9]+(?:[.,][0-9]+)?\b",
+              r"\bO\s*[0-9]+(?:[.,][0-9]+)?\b",
+              r"\bU\s*[0-9]+(?:[.,][0-9]+)?\b",
+              r"[+-]?[0-9]+(?:[.,][0-9]+)?",
+          ]
+
+          found = set()
+
+          for pattern in market_patterns:
+              for match in re.findall(
+                  pattern,
+                  normalized
+              ):
+                  found.add(match)
+
+          print("Detected market-like values:")
+
+          for value in sorted(found):
+              print(" ", value)
+
+          print()
+
+          if not found:
+              print(
+                  "WARNING: Tidak ditemukan market "
+                  "secara jelas dari OCR."
+              )
+              print(
+                  "OCR tetap disimpan sebagai artifact "
+                  "untuk pemeriksaan."
+              )
+          else:
+              print(
+                  "Market-like data berhasil terdeteksi."
+              )
+
+          print("MARKET AUDIT: COMPLETE")
+          PY
+
+          python /tmp/audit_market_text.py
+
+      - name: Manual time-window validation
+        env:
+          TIME_WINDOW: ${{ inputs.time_window }}
+        run: |
+          set -euo pipefail
+
+          python - "$TIME_WINDOW" <<'PY'
+          import sys
+
+          value = sys.argv[1]
+
+          allowed = {
+              "18:00-21:00",
+              "21:00-00:00",
+              "00:00-05:00",
+              "05:00-10:00",
+          }
+
+          assert value in allowed
+
+          print(
+              "MANUAL TIME WINDOW:",
+              value
+          )
+
+          print(
+              "TIME WINDOW VALIDATION: PASS"
+          )
+          PY
+
+      - name: Verify V20.78.52 core
+        run: |
+          set -euo pipefail
+
+          required=(
+            "v20_78_52_competition_resolver.py"
+            "v20_78_52_data_acquisition.py"
+            "v20_78_52_data_quality_bridge.py"
+            "v20_78_52_entity_classifier.py"
+            "v20_78_52_provider_router.py"
+          )
+
+          for file in "${required[@]}"; do
+            test -f "$file"
+            echo "FOUND: $file"
+          done
+
+          python -m compileall -q .
+
+          echo
+          echo "V20.78.52 CORE: PASS"
+
+      - name: Discover screenshot parser
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "SCREENSHOT / PARSER DISCOVERY"
+          echo "=========================================="
+
+          find . -type f \
+            -name "*.py" \
+            -not -path "./.git/*" \
+            \( \
+              -iname "*screenshot*.py" \
+              -o -iname "*parser*.py" \
+              -o -iname "*ocr*.py" \
+            \) \
+            | sort
+
+      - name: Run repository parser tests
+        run: |
+          set -euo pipefail
+
+          FOUND=0
+
+          while IFS= read -r file; do
+            FOUND=1
+            echo
+            echo "Running: $file"
+            pytest -q "$file"
+          done < <(
+            find . -type f \
+              -name "test_*.py" \
+              -not -path "./.git/*" \
+              | grep -Ei \
+                "(screenshot|parser|ocr)" \
+              || true
+          )
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo
+            echo "No dedicated screenshot/parser tests found."
+          fi
+
+      - name: Create real screenshot run manifest
+        env:
+          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+          TIME_WINDOW: ${{ inputs.time_window }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          import hashlib
+          from pathlib import Path
+
+          screenshot = Path(
+              "${{ inputs.screenshot_path }}"
+          )
+
+          digest = hashlib.sha256(
+              screenshot.read_bytes()
+          ).hexdigest()
+
+          manifest = {
+              "engine": "Prediksi 2",
+              "version": "V20.79",
+              "baseline": "V20.78.52",
+              "source": "PelangiEuro",
+              "screenshot": str(screenshot),
+              "sha256": digest,
+              "time_window": "${{ inputs.time_window }}",
+              "market_source_locked": True,
+              "line_source_locked": True,
+              "no_forced_quota": True,
+              "missing_data_is_not_negative": True,
+              "status": "SCREENSHOT_INPUT_ACCEPTED"
+          }
+
+          Path(
+              "artifacts/run_manifest.json"
+          ).write_text(
+              json.dumps(
+                  manifest,
+                  indent=2,
+                  ensure_ascii=False
+              ),
+              encoding="utf-8"
+          )
+
+          print(
+              json.dumps(
+                  manifest,
+                  indent=2,
+                  ensure_ascii=False
+              )
+          )
+          PY
+
+      - name: Upload screenshot run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v20-79-real-screenshot-run
+          path: artifacts/
+
+      - name: Final status
+        run: |
+          set -euo pipefail
+
+          echo
+          echo "======================================================"
+          echo " V20.79 REAL SCREENSHOT INPUT: PASS"
+          echo "======================================================"
+          echo
+          echo "Screenshot:"
+          echo "${{ inputs.screenshot_path }}"
+          echo
+          echo "Manual time window:"
+          echo "${{ inputs.time_window }}"
+          echo
+          echo "Verified:"
+          echo "  [PASS] Screenshot exists"
+          echo "  [PASS] Image readable"
+          echo "  [PASS] OCR executed"
+          echo "  [PASS] Market audit executed"
+          echo "  [PASS] Manual time window"
+          echo "  [PASS] V20.78.52 core"
+          echo "  [PASS] Parser discovery"
+          echo "  [PASS] Run manifest"
+          echo
+          echo "IMPORTANT:"
+          echo "Screenshot remains the source of market/line truth."
+          echo
+          echo "Next stage:"
+          echo "REAL SCREENSHOT -> REAL FIXTURE -> REAL EVIDENCE"
+          echo "-> REAL PROBABILITY -> QUALIFICATION -> PARLAY"
