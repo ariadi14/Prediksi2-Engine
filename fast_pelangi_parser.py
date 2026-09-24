@@ -57,11 +57,15 @@ def _repair_team(s:str)->str:
     return s
 
 def _parse_total_line(raw):
-    raw=clean(raw).replace(',', '.')
-    m=re.search(r'(?<![0-9])([0-9]{1,2})\s*(¼|½|¾)(?![0-9])', raw)
+    # Check source fraction glyphs before NFKC normalization in clean().
+    # NFKC expands ¼/½/¾ into digit + fraction-slash + digit, so the
+    # glyph-specific recovery must happen on the original OCR token stream.
+    source_raw=str(raw).replace(',', '.')
+    m=re.search(r'(?<![0-9])([0-9]{1,2})\s*(¼|½|¾)(?![0-9])', source_raw)
     if m:
         whole=int(m.group(1))
         return whole + {'¼':0.25,'½':0.5,'¾':0.75}[m.group(2)]
+    raw=clean(source_raw)
     raw=raw.replace('¼',' 1/4').replace('½',' 1/2').replace('¾',' 3/4')
     raw=re.sub(r'\s+',' ',raw).strip()
     m=re.search(r'([0-9]+)\s*(?:(1/4|1/2|3/4)|\.([0-9]+))$', raw)
