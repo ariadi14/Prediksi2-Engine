@@ -191,6 +191,89 @@ class FastPelangiParser:
                 if text and not _is_header(text) and nt not in DRAW_WORDS and len(text)>=2:
                     pending.append((y,text))
                     if len(pending)>4: pending=pending[-4:]
+        # Recovery pass: some screenshots lose the literal "Draw" token.
+        # Reconstruct adjacent team pairs and attach only odds actually visible.
+        blocks=[]; current=[]; current_comp=comp
+        for y,text in lines:
+            if _is_header(text):
+                if current: blocks.append((current_comp,current)); current=[]
+                current_comp=text
+                continue
+            if text and 'draw' not in norm(text):
+                current.append((y,_repair_team(text)))
+        if current: blocks.append((current_comp,current))
+
+        def extract_markets(gy):
+            def vals2(x1,x2):
+                z=df[(df.left>=x1)&(df.left<x2)&(df.top>=gy-75)&(df.top<=gy+20)]
+                out=[]
+                for _,rr in z.iterrows():
+                    for q in ODDS_RE.findall(str(rr.text)):
+                        try: out.append((float(q.replace(',','.')),int(rr.top)))
+                        except: pass
+                seen=set(); out2=[]
+                for v in sorted(out,key=lambda x:(x[1],x[0])):
+                    if (v[0],v[1]) not in seen:
+                        seen.add((v[0],v[1])); out2.append(v)
+                return out2
+            one=vals2(415,505); ou=vals2(505,610); hd=vals2(610,690)
+            htxt=[]; otxt=[]
+            for _,rr in df.iterrows():
+                if 500<=rr.left<600 and gy-75<=rr.top<=gy+20:
+                    t=clean(str(rr.text))
+                    if t: htxt.append(t)
+                if 505<=rr.left<610 and gy-75<=rr.top<=gy+20:
+                    t=clean(str(rr.text))
+                    if t: otxt.append(t)
+            hline=_parse_hdp_line(' '.join(htxt))
+            oline=_parse_total_line(' '.join(otxt))
+            if oline is not None:
+                ou=[x for x in ou if abs(x[0]-oline)>1e-9]
+            markets=[]
+            if len(one)>=3:
+                markets += [{'market':'1X2','selection':sel,'line':None,'odds':od}
+                            for sel,(od,_) in zip(('Home','Draw','Away'),one[:3])]
+            if oline is not None and len(ou)>=2:
+                markets += [{'market':'O/U','selection':sel,'line':oline,'odds':od}
+                            for sel,(od,_) in zip(('Over','Under'),ou[:2])]
+            if len(hd)>=2:
+                markets += [{'market':'HDP','selection':sel,'line':hline,'odds':od}
+                            for sel,(od,_) in zip(('Home','Away'),hd[:2])]
+            return markets
+
+        for block_comp,items in blocks:
+            i=0
+            while i+1<len(items):
+                y1,t1=items[i]; y2,t2=items[i+1]
+                if y2-y1>75:
+                    i+=1
+                    continue
+                best_markets=[]
+                for delta in (0,10,20,30):
+                    mk=extract_markets(y2+delta)
+                    if len(mk)>len(best_markets):
+                        best_markets=mk
+                if best_markets:
+                    key=(norm(block_comp),norm(t1),norm(t2))
+                    existing=None
+                    for rr in rows:
+                        if (norm(rr.get('competition')),norm(rr.get('home')),norm(rr.get('away'))) == key:
+                            existing=rr; break
+                    if existing is None:
+                        rows.append({'competition':block_comp,'home':t1,'away':t2,
+                                     'kickoff':pending_kickoff,'match_date':None,
+                                     'markets':best_markets,'image_id':h12(path),
+                                     'parse_warnings':['KICKOFF_UNREADABLE_SOURCE_CROP',
+                                                       'MATCH_DATE_NOT_VISIBLE',
+                                                       'DRAW_TOKEN_RECOVERY']})
+                    else:
+                        seen={(x['market'],x['selection'],x.get('line'),x['odds']) for x in existing.get('markets',[])}
+                        for mk in best_markets:
+                            sig=(mk['market'],mk['selection'],mk.get('line'),mk['odds'])
+                            if sig not in seen:
+                                existing['markets'].append(mk); seen.add(sig)
+                i+=2
+
         return {'image':os.path.basename(path),'parsed_rows':len(rows),'fixtures':rows,'last_competition':comp}
 
     def replay(self,paths,time_choice='ALL'):
