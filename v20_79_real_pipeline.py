@@ -8,8 +8,10 @@ for visible market/line/odds; provider data is used only for fixture/evidence.
 from __future__ import annotations
 
 import argparse, json, math
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
+from zoneinfo import ZoneInfo
 
 from fast_pelangi_parser import FastPelangiParser
 from v20_78_39_provider_aware_pipeline import ProviderAwarePipeline
@@ -33,10 +35,8 @@ def asian_ev(home_xg: float, away_xg: float, market: str, line: float,
     matrix = score_matrix(home_xg, away_xg, max_goals=12, rho=rho)
     m = str(market).upper()
     total = 0.0
-    weight_sum = 0.0
 
     if m == "O/U":
-        # Over/Under line is split into adjacent quarter components.
         if abs(line * 4 - round(line * 4)) > 1e-9:
             raise ValueError(f"Unsupported total line: {line}")
         q = round(line * 4) % 2
@@ -128,10 +128,28 @@ def in_window(hhmm: str, window: str) -> bool:
     a, b = starts[window], ends[window]
     return a <= t < b if a < b else (t >= a or t < b)
 
+
+def resolve_fixture_search_date(value: str) -> str:
+    """Return the date used to query provider fixtures.
+
+    AUTO means the current date in the user's Indonesian timezone. A supplied
+    YYYY-MM-DD value is used verbatim for reproducible historical screenshots.
+    """
+    value = str(value or "AUTO").strip()
+    if value.upper() == "AUTO":
+        return datetime.now(ZoneInfo("Asia/Jakarta")).date().isoformat()
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise SystemExit(f"INVALID_FIXTURE_DATE: {value}; use AUTO or YYYY-MM-DD")
+    return value
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--screenshot", nargs="+", required=True, help="One or more PelangiEuro screenshot paths")
     ap.add_argument("--time-window", required=True)
+    ap.add_argument("--fixture-date", default="AUTO", help="Provider fixture search date: AUTO or YYYY-MM-DD")
     ap.add_argument("--min-probability", type=float, default=0.55)
     ap.add_argument("--min-ev", type=float, default=0.02)
     ap.add_argument("--output", default="artifacts/v20_79_final_output.json")
@@ -146,6 +164,8 @@ def main() -> int:
     if args.time_window not in allowed:
         raise SystemExit(f"INVALID_TIME_WINDOW: {args.time_window}")
 
+    fixture_search_date = resolve_fixture_search_date(args.fixture_date)
+
     parser = FastPelangiParser()
     fixtures = []
     parsed_by_screenshot = []
@@ -159,13 +179,16 @@ def main() -> int:
         for fixture in parsed_fixtures:
             fixture = dict(fixture)
             fixture["source_screenshot"] = screenshot
+            # The source screenshots do not expose a reliable match date in the
+            # parser crop. For current use, AUTO anchors fixture resolution to
+            # today's Jakarta date; historical runs can pass an explicit date.
+            if not fixture.get("match_date"):
+                fixture["match_date"] = fixture_search_date
             fixtures.append(fixture)
 
     if not fixtures:
         raise SystemExit("NO_FIXTURES_PARSED_FROM_SCREENSHOTS")
 
-    # Time filtering happens after provider resolution as a fallback because
-    # older screenshots may not expose kickoff in the left crop.
     pipeline = ProviderAwarePipeline()
     results = []
     unresolved = []
@@ -185,9 +208,6 @@ def main() -> int:
             })
             continue
 
-        # Multiple screenshots may overlap at a page boundary. Deduplicate only
-        # after real provider resolution so we do not accidentally collapse
-        # different competitions or dates.
         resolved_key = "|".join(str(resolved.get(k, "")) for k in (
             "competition", "home_canonical", "away_canonical", "match_date", "kickoff"
         ))
@@ -212,8 +232,6 @@ def main() -> int:
             continue
 
         visible = resolved.get("markets") or []
-        # Ask the probability engine to calculate every exact line visible in
-        # the screenshot, including quarter lines.
         ev_payload = dict(provider_evidence.get("payload") or {})
         ev_payload["ou_lines"] = sorted({
             float(x["line"]) for x in visible
@@ -273,9 +291,7 @@ def main() -> int:
         m for r in results for m in r["markets"]
         if m.get("qualified")
     ]
-    # Never select two markets from the same fixture.
     candidates.sort(key=lambda x: (x.get("ev", -999), x.get("model_probability", 0)), reverse=True)
-    selected_5 = []
     selected_7 = []
     for c in candidates:
         if any(x["fixture_id"] == c["fixture_id"] for x in selected_7):
@@ -292,6 +308,8 @@ def main() -> int:
         "screenshots": screenshots,
         "parsed_by_screenshot": parsed_by_screenshot,
         "time_window": args.time_window,
+        "fixture_search_date": fixture_search_date,
+        "fixture_search_date_mode": "AUTO_JAKARTA_TODAY" if str(args.fixture_date).upper() == "AUTO" else "EXPLICIT",
         "time_filter_applied_after_provider_resolution": True,
         "time_filter_mode": "MANUAL",
         "market_source_locked": True,
@@ -324,6 +342,8 @@ def main() -> int:
         "counts": output["counts"],
         "candidate_parlay_5_legs": len(selected_5),
         "candidate_parlay_7_legs": len(selected_7),
+        "fixture_search_date": fixture_search_date,
+        "fixture_search_date_mode": output["fixture_search_date_mode"],
     }, indent=2))
     return 0
 
