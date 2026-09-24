@@ -3,48 +3,109 @@ No fabricated live data. A deterministic mock provider is available only for int
 """
 from __future__ import annotations
 from typing import Any, Dict
+from rapidfuzz import fuzz
 from v20_78_34_provider_connection import ProviderConnection
 from v20_78_35_fixture_validation import validate_fixture
 from v20_78_36_evidence_retrieval import EvidenceService
 from v20_78_37_probability_activation import ProbabilityActivation
+from v20_78_28_team_identity import norm_name
+
 
 class ProviderAwarePipeline:
     VERSION='V20.78.39'
+
     def __init__(self, connection=None):
         self.connection=connection or ProviderConnection()
         self.providers=self.connection.providers
         self.ev=EvidenceService(self.providers)
         self.prob=ProbabilityActivation()
 
+    @staticmethod
+    def _fallback_team_identity(provider, name):
+        """Resolve OCR-noisy team names without inventing an identity.
+
+        The original resolver required a high absolute score before trying a
+        fixture. Screenshot OCR can lower that score even when the correct
+        provider team is obvious. We therefore use the provider's candidate
+        search, rank candidates by normalized similarity, and require both a
+        reasonable score and a clear margin over the runner-up.
+        """
+        fn=getattr(provider,'search_teams',None)
+        if not fn or not name:
+            return None
+        try:
+            rows=fn(name) or []
+        except Exception:
+            return None
+        scored=[]
+        q=norm_name(name)
+        for row in rows:
+            candidate=row.get('name')
+            if not candidate:
+                continue
+            score=max(
+                fuzz.ratio(q,norm_name(candidate)),
+                fuzz.WRatio(q,norm_name(candidate)),
+            )
+            scored.append((float(score),row))
+        if not scored:
+            return None
+        scored.sort(key=lambda x:x[0], reverse=True)
+        score,row=scored[0]
+        second=scored[1][0] if len(scored)>1 else 0.0
+        if score < 70.0 or (len(scored)>1 and score-second < 8.0):
+            return None
+        return {
+            'status':'RESOLVED_FALLBACK',
+            'raw':name,
+            'canonical_name':row.get('name'),
+            'score':round(score,1),
+            'second_score':round(second,1),
+            'provider_ids':row.get('provider_ids') or {},
+            'country':row.get('country'),
+        }
+
     def resolve_identity(self, fixture: Dict[str,Any]):
         out=dict(fixture)
         for side in ('home','away'):
             name=out.get(f'{side}_canonical') or out.get(side)
-            if not name: continue
+            if not name:
+                continue
             best=None
             for p in self.providers:
                 fn=getattr(p,'resolve_team',None)
-                if not fn: continue
+                if not fn:
+                    continue
                 try:
                     r=fn(name)
                 except Exception as e:
                     r={'status':'UNRESOLVED','reason':str(e)[:160]}
                 if r.get('status') in ('RESOLVED_HIGH','RESOLVED_MEDIUM'):
-                    best=r; break
-                if best is None: best=r
+                    best=r
+                    break
+                fallback=self._fallback_team_identity(p,name)
+                if fallback and (best is None or fallback.get('score',0) > best.get('score',0)):
+                    best=fallback
+                elif best is None:
+                    best=r
             if best:
                 out[f'{side}_identity']=best
-                if best.get('canonical_name'): out[f'{side}_canonical']=best['canonical_name']
-                if best.get('provider_ids'): out[f'{side}_provider_ids']=best['provider_ids']
+                if best.get('canonical_name'):
+                    out[f'{side}_canonical']=best['canonical_name']
+                if best.get('provider_ids'):
+                    out[f'{side}_provider_ids']=best['provider_ids']
         return out
 
     def resolve_fixture(self, fixture: Dict[str,Any]):
         f=self.resolve_identity(fixture)
         for p in self.providers:
             fn=getattr(p,'find_fixture',None)
-            if not fn: continue
-            try: candidates=fn(f) or []
-            except Exception: candidates=[]
+            if not fn:
+                continue
+            try:
+                candidates=fn(f) or []
+            except Exception:
+                candidates=[]
             for c in candidates:
                 v=validate_fixture(f,c)
                 if v.get('status')=='VALID':
