@@ -92,7 +92,16 @@ class APIFootballProvider:
             for f in rows:
                 h=f.get('teams',{}).get('home',{}); a=f.get('teams',{}).get('away',{})
                 if (n(h.get('name'))==hn or h.get('id')==hp) and n(a.get('name'))==an:
-                    out.append({'fixture_id':f.get('fixture',{}).get('id'),'home_name':h.get('name'),'away_name':a.get('name'),'date':str(f.get('fixture',{}).get('date',''))[:10],'competition':(f.get('league') or {}).get('name')})
+                    fixture_date=str(f.get('fixture',{}).get('date',''))
+                kickoff_wib=None
+                try:
+                    from datetime import datetime, timezone
+                    from zoneinfo import ZoneInfo
+                    dt=datetime.fromisoformat(fixture_date.replace('Z','+00:00'))
+                    kickoff_wib=dt.astimezone(ZoneInfo('Asia/Jakarta')).strftime('%Y-%m-%dT%H:%M:%S%z')
+                except Exception:
+                    pass
+                out.append({'fixture_id':f.get('fixture',{}).get('id'),'home_name':h.get('name'),'away_name':a.get('name'),'date':fixture_date[:10],'kickoff_utc':fixture_date,'kickoff_wib':kickoff_wib,'competition':(f.get('league') or {}).get('name')})
             return out
         except Exception:
             return []
