@@ -3,8 +3,8 @@ name: V20.79 - FINAL REAL PIPELINE
 on:
   workflow_dispatch:
     inputs:
-      screenshot_path:
-        description: "Path screenshot PelangiEuro yang sudah di-upload ke repository"
+      screenshot_paths:
+        description: "Path screenshot PelangiEuro di repository, pisahkan dengan koma untuk batch"
         required: true
         type: string
       time_window:
@@ -68,26 +68,28 @@ jobs:
           }
           echo "API-FOOTBALL SECRET: PRESENT"
 
-      - name: Validate screenshot input
+      - name: Validate batch screenshot input
         env:
-          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+          SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
         run: |
           set -euo pipefail
-          test -f "$SCREENSHOT_PATH" || {
-            echo "ERROR: screenshot tidak ditemukan: $SCREENSHOT_PATH"
-            echo "Upload screenshot PelangiEuro ke repository terlebih dahulu."
-            exit 1
-          }
-
-          python - "$SCREENSHOT_PATH" <<'PY'
+          python - "$SCREENSHOT_PATHS" <<'PY'
           import sys
           from PIL import Image
-          image = Image.open(sys.argv[1])
-          print("FORMAT:", image.format)
-          print("SIZE:", image.size)
-          print("MODE:", image.mode)
-          assert image.width > 0 and image.height > 0
-          print("SCREENSHOT VALIDATION: PASS")
+
+          paths = [x.strip() for x in sys.argv[1].split(",") if x.strip()]
+          if not paths:
+              raise SystemExit("ERROR: screenshot_paths kosong.")
+
+          for path in paths:
+              image = Image.open(path)
+              print("SCREENSHOT:", path)
+              print("  FORMAT:", image.format)
+              print("  SIZE:", image.size)
+              print("  MODE:", image.mode)
+              assert image.width > 0 and image.height > 0
+
+          print(f"BATCH SCREENSHOT VALIDATION: PASS ({len(paths)} files)")
           PY
 
       - name: Python syntax and import gate
@@ -112,7 +114,7 @@ jobs:
 
       - name: Run FINAL REAL pipeline
         env:
-          SCREENSHOT_PATH: ${{ inputs.screenshot_path }}
+          SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
           TIME_WINDOW: ${{ inputs.time_window }}
           MIN_PROBABILITY: ${{ inputs.minimum_probability }}
           MIN_EV: ${{ inputs.minimum_ev }}
@@ -120,7 +122,17 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
 
-          python v20_79_real_pipeline.py             --screenshot "$SCREENSHOT_PATH"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --output artifacts/v20_79_final_output.json
+          IFS=',' read -r -a SCREENSHOTS <<< "$SCREENSHOT_PATHS"
+          test "${#SCREENSHOTS[@]}" -gt 0
+
+          SCREENSHOT_ARGS=()
+          for screenshot in "${SCREENSHOTS[@]}"; do
+              screenshot="$(echo "$screenshot" | xargs)"
+              test -n "$screenshot"
+              SCREENSHOT_ARGS+=( "$screenshot" )
+          done
+
+          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --output artifacts/v20_79_final_output.json
 
       - name: Validate FINAL output safety
         run: |
@@ -151,6 +163,7 @@ jobs:
 
           print("FINAL OUTPUT SAFETY: PASS")
           print()
+          print("Input screenshots:", len(data["screenshots"]))
           print("Counts:", data["counts"])
           print("5-leg candidates:", len(data["candidate_parlay_5"]))
           print("7-leg candidates:", len(data["candidate_parlay_7"]))
