@@ -120,8 +120,21 @@ def evaluate_markets(prediction: Dict[str, Any], visible: List[Dict[str, Any]]) 
     return out
 
 
-def in_window(hhmm: str, window: str) -> bool:
-    h, m = map(int, hhmm[:5].split(':'))
+def in_window(kickoff: str, window: str) -> bool:
+    """Check a provider kickoff against the manual local-time window.
+
+    Provider resolution may return either HH:MM or an ISO datetime such as
+    YYYY-MM-DDTHH:MM:SS+0700. Always use the local WIB time portion.
+    """
+    value = str(kickoff or "").strip()
+    if "T" in value and len(value) >= 16:
+        hhmm = value[11:16]
+    else:
+        hhmm = value[:5]
+    try:
+        h, m = map(int, hhmm.split(':'))
+    except (ValueError, AttributeError):
+        raise ValueError(f"INVALID_KICKOFF_TIME: {kickoff}")
     t = h * 60 + m
     starts = {"18:00-21:00": 1080, "21:00-00:00": 1260, "00:00-05:00": 0, "05:00-10:00": 300}
     ends = {"18:00-21:00": 1260, "21:00-00:00": 1440, "00:00-05:00": 300, "05:00-10:00": 600}
