@@ -176,6 +176,8 @@ class FastPelangiParser:
                         if t:
                             outexts.append(t)
                 ouline=_parse_total_line(' '.join(outexts))
+                if ouline is not None:
+                    ou=[x for x in ou if abs(x[0]-ouline)>1e-9]
                 if ouline is not None and len(ou)>=2:
                     for sel,(od,_) in zip(('Over','Under'),ou[:2]):
                         markets.append({'market':'O/U','selection':sel,'line':ouline,'odds':od})
