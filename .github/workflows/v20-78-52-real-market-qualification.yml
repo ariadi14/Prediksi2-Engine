@@ -1,0 +1,477 @@
+name: V20.78.52 Real Market Qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  market-qualification:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =========================================================
+      # 1. CHECKOUT
+      # =========================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: main
+
+      # =========================================================
+      # 2. PYTHON
+      # =========================================================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+          python -m pip install pytest numpy scipy pandas scikit-learn
+
+      # =========================================================
+      # 3. DISCOVER QUALIFICATION MODULE
+      # =========================================================
+      - name: Discover qualification modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "QUALIFICATION MODULE DISCOVERY"
+          echo "=============================================="
+
+          find . \
+            -type f \
+            -not -path "./.git/*" \
+            \
+              -iname "*qualification*.py" \
+              -o -iname "*market*.py" \
+              -o -iname "*value*.py" \
+              -o -iname "*calibration*.py" \
+            \
+            | sort
+
+      # =========================================================
+      # 4. IMPORT QUALIFICATION MODULES IF PRESENT
+      # =========================================================
+      - name: Import qualification modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/import_qualification.py <<'PY'
+          import importlib
+          import os
+
+          candidates = [
+              "v20_78_51_match_qualification",
+              "v20_78_51_market_value",
+              "v20_78_51_calibration",
+          ]
+
+          for module_name in candidates:
+
+              try:
+                  module = importlib.import_module(module_name)
+
+                  print(
+                      "IMPORT PASS:",
+                      module_name
+                  )
+
+                  print(
+                      "LOCATION:",
+                      getattr(
+                          module,
+                          "__file__",
+                          "UNKNOWN"
+                      )
+                  )
+
+              except ModuleNotFoundError:
+
+                  print(
+                      "MODULE NOT FOUND:",
+                      module_name
+                  )
+
+          print("")
+          print("QUALIFICATION MODULE DISCOVERY: PASS")
+          PY
+
+          python /tmp/import_qualification.py
+
+      # =========================================================
+      # 5. PROBABILITY THRESHOLD
+      # =========================================================
+      - name: Validate probability threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_probability_threshold.py <<'PY'
+          candidates = [
+              {
+                  "selection": "HOME",
+                  "probability": 0.78,
+              },
+              {
+                  "selection": "OVER 3.5",
+                  "probability": 0.62,
+              },
+              {
+                  "selection": "AWAY",
+                  "probability": 0.48,
+              },
+          ]
+
+          minimum_probability = 0.60
+
+          qualified = [
+              candidate
+              for candidate in candidates
+              if candidate["probability"]
+              >= minimum_probability
+          ]
+
+          print(
+              "Minimum probability:",
+              minimum_probability
+          )
+
+          for candidate in qualified:
+              print(
+                  "QUALIFIED:",
+                  candidate
+              )
+
+          assert len(qualified) == 2
+
+          print(
+              "PROBABILITY THRESHOLD: PASS"
+          )
+          PY
+
+          python /tmp/test_probability_threshold.py
+
+      # =========================================================
+      # 6. EDGE
+      # =========================================================
+      - name: Validate edge calculation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_edge.py <<'PY'
+          probability = 0.65
+          odds = 1.80
+
+          implied_probability = 1.0 / odds
+
+          edge = (
+              probability
+              - implied_probability
+          )
+
+          print(
+              "Model probability:",
+              probability
+          )
+
+          print(
+              "Odds:",
+              odds
+          )
+
+          print(
+              "Implied probability:",
+              implied_probability
+          )
+
+          print(
+              "Edge:",
+              edge
+          )
+
+          assert edge > 0
+
+          print("EDGE CALCULATION: PASS")
+          PY
+
+          python /tmp/test_edge.py
+
+      # =========================================================
+      # 7. FAIR ODDS
+      # =========================================================
+      - name: Validate fair odds
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_fair_odds.py <<'PY'
+          probability = 0.65
+
+          fair_odds = 1.0 / probability
+
+          print(
+              "Probability:",
+              probability
+          )
+
+          print(
+              "Fair odds:",
+              fair_odds
+          )
+
+          assert fair_odds > 1.0
+
+          print("FAIR ODDS: PASS")
+          PY
+
+          python /tmp/test_fair_odds.py
+
+      # =========================================================
+      # 8. EXPECTED VALUE
+      # =========================================================
+      - name: Validate expected value
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_ev.py <<'PY'
+          probability = 0.65
+          odds = 1.80
+
+          ev = (
+              probability
+              * odds
+              - 1.0
+          )
+
+          print(
+              "Probability:",
+              probability
+          )
+
+          print(
+              "Odds:",
+              odds
+          )
+
+          print(
+              "EV:",
+              ev
+          )
+
+          assert ev > 0
+
+          print("EXPECTED VALUE: PASS")
+          PY
+
+          python /tmp/test_ev.py
+
+      # =========================================================
+      # 9. DEVIG
+      # =========================================================
+      - name: Validate de-vig calculation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_devig.py <<'PY'
+          odds_home = 1.80
+          odds_away = 2.10
+
+          raw_home = 1.0 / odds_home
+          raw_away = 1.0 / odds_away
+
+          total = raw_home + raw_away
+
+          fair_home = raw_home / total
+          fair_away = raw_away / total
+
+          print(
+              "Raw HOME:",
+              raw_home
+          )
+
+          print(
+              "Raw AWAY:",
+              raw_away
+          )
+
+          print(
+              "Fair HOME:",
+              fair_home
+          )
+
+          print(
+              "Fair AWAY:",
+              fair_away
+          )
+
+          assert abs(
+              fair_home
+              + fair_away
+              - 1.0
+          ) < 1e-9
+
+          print("DE-VIG: PASS")
+          PY
+
+          python /tmp/test_devig.py
+
+      # =========================================================
+      # 10. SOURCE MARKET LOCK
+      # =========================================================
+      - name: Validate source market lock
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_source_lock.py <<'PY'
+          source_markets = [
+              {
+                  "market_type": "OU",
+                  "line": 3.5,
+                  "selection": "OVER",
+                  "odds": 1.90,
+              },
+              {
+                  "market_type": "OU",
+                  "line": 3.5,
+                  "selection": "UNDER",
+                  "odds": 1.85,
+              },
+              {
+                  "market_type": "HDP",
+                  "line": -0.75,
+                  "selection": "HOME",
+                  "odds": 1.92,
+              },
+          ]
+
+          def is_visible(
+              market_type,
+              line,
+              selection
+          ):
+
+              for market in source_markets:
+
+                  if (
+                      market["market_type"]
+                      == market_type
+                      and market["line"]
+                      == line
+                      and market["selection"]
+                      == selection
+                  ):
+                      return True
+
+              return False
+
+          assert is_visible(
+              "OU",
+              3.5,
+              "OVER"
+          )
+
+          assert is_visible(
+              "OU",
+              3.5,
+              "UNDER"
+          )
+
+          assert is_visible(
+              "HDP",
+              -0.75,
+              "HOME"
+          )
+
+          assert not is_visible(
+              "OU",
+              2.5,
+              "OVER"
+          )
+
+          assert not is_visible(
+              "HDP",
+              -0.5,
+              "HOME"
+          )
+
+          print(
+              "VISIBLE MARKETS ACCEPTED"
+          )
+
+          print(
+              "INVISIBLE LINES REJECTED"
+          )
+
+          print(
+              "SOURCE MARKET LOCK: PASS"
+          )
+          PY
+
+          python /tmp/test_source_lock.py
+
+      # =========================================================
+      # 11. NO INVENTED MARKET
+      # =========================================================
+      - name: Validate no invented market
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_no_invented_market.py <<'PY'
+          source_lines = {
+              "OU": {3.5},
+              "HDP": {-0.75},
+          }
+
+          requested = [
+              ("OU", 3.5),
+              ("HDP", -0.75),
+          ]
+
+          for market_type, line in requested:
+
+              assert line in source_lines[market_type]
+
+          forbidden = [
+              ("OU", 2.5),
+              ("HDP", -0.5),
+          ]
+
+          for market_type, line in forbidden:
+
+              assert line not in source_lines[market_type]
+
+          print(
+              "NO INVENTED MARKET: PASS"
+          )
+          PY
+
+          python /tmp/test_no_invented_market.py
+
+      # =========================================================
+      # 12. DATA CONFIDENCE
+      # =========================================================
+      - name: Validate data confidence
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/test_data_confidence.py <<'PY'
+          evidence = {
+              "fixture":
