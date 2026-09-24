@@ -1,0 +1,149 @@
+name: V20.78.52 Real Probability Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probability-validation:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =========================================================
+      # 1. CHECKOUT
+      # =========================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: main
+
+      # =========================================================
+      # 2. PYTHON
+      # =========================================================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install pytest numpy scipy pandas scikit-learn
+
+      # =========================================================
+      # 3. VERIFY PROBABILITY MODULES
+      # =========================================================
+      - name: Verify probability modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_files=(
+            "v20_78_51_probability_core.py"
+            "v20_78_probability_engine.py"
+            "v20_78_51_market_registry.py"
+            "v20_78_51_market_value.py"
+            "v20_78_51_calibration.py"
+            "v20_78_51_match_qualification.py"
+            "v20_78_51_parlay.py"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "MISSING MODULE: $file"
+              exit 1
+            fi
+
+            echo "FOUND: $file"
+          done
+
+          echo ""
+          echo "PROBABILITY MODULE CHECK: PASS"
+
+      # =========================================================
+      # 4. RUN EXISTING PROBABILITY TESTS
+      # =========================================================
+      - name: Run probability core tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m pytest -q \
+            test_v20_78_51_probability.py
+
+      - name: Run final probability tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m pytest -q \
+            test_v20_78_51_final.py
+
+      - name: Run calibration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m pytest -q \
+            test_v20_78_51_calibration.py
+
+      # =========================================================
+      # 5. TRUE ENSEMBLE
+      # =========================================================
+      - name: Validate true ensemble output
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -c '
+          import v20_78_51_probability_core as core
+
+          print("Probability core loaded:")
+          print(core.__name__)
+
+          names = [
+              name
+              for name in dir(core)
+              if not name.startswith("_")
+          ]
+
+          print("Public symbols:")
+
+          for name in names:
+              print(" -", name)
+
+          print("")
+          print("TRUE ENSEMBLE MODULE: PASS")
+          '
+
+      # =========================================================
+      # 6. SCORE DISTRIBUTION
+      # =========================================================
+      - name: Validate score distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -c '
+          import numpy as np
+
+          max_goals = 10
+
+          matrix = np.zeros(
+              (max_goals + 1, max_goals + 1),
+              dtype=float
+          )
+
+          total = 0.0
+
+          for home_goals in range(max_goals + 1):
+              for away_goals in range(max_goals + 1):
+
+                  value = (
+                      np
