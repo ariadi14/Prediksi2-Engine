@@ -130,32 +130,46 @@ def in_window(hhmm: str, window: str) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--screenshot", required=True)
+    ap.add_argument("--screenshot", nargs="+", required=True, help="One or more PelangiEuro screenshot paths")
     ap.add_argument("--time-window", required=True)
     ap.add_argument("--min-probability", type=float, default=0.55)
     ap.add_argument("--min-ev", type=float, default=0.02)
     ap.add_argument("--output", default="artifacts/v20_79_final_output.json")
     args = ap.parse_args()
 
-    if not Path(args.screenshot).is_file():
-        raise SystemExit(f"SCREENSHOT_NOT_FOUND: {args.screenshot}")
+    screenshots = [str(Path(x)) for x in args.screenshot]
+    missing = [x for x in screenshots if not Path(x).is_file()]
+    if missing:
+        raise SystemExit(f"SCREENSHOT_NOT_FOUND: {missing}")
 
     allowed = {"18:00-21:00", "21:00-00:00", "00:00-05:00", "05:00-10:00"}
     if args.time_window not in allowed:
         raise SystemExit(f"INVALID_TIME_WINDOW: {args.time_window}")
 
     parser = FastPelangiParser()
-    parsed = parser.replay([args.screenshot], time_choice="ALL")
-    fixtures = parsed.get("fixtures", [])
+    fixtures = []
+    parsed_by_screenshot = []
+    for screenshot in screenshots:
+        parsed = parser.replay([screenshot], time_choice="ALL")
+        parsed_fixtures = parsed.get("fixtures", [])
+        parsed_by_screenshot.append({
+            "screenshot": screenshot,
+            "parsed_fixtures": len(parsed_fixtures),
+        })
+        for fixture in parsed_fixtures:
+            fixture = dict(fixture)
+            fixture["source_screenshot"] = screenshot
+            fixtures.append(fixture)
 
     if not fixtures:
-        raise SystemExit("NO_FIXTURES_PARSED_FROM_SCREENSHOT")
+        raise SystemExit("NO_FIXTURES_PARSED_FROM_SCREENSHOTS")
 
     # Time filtering happens after provider resolution as a fallback because
     # older screenshots may not expose kickoff in the left crop.
     pipeline = ProviderAwarePipeline()
     results = []
     unresolved = []
+    seen_fixture_keys = set()
 
     for fixture in fixtures:
         if not fixture.get("home") or not fixture.get("away"):
@@ -170,6 +184,16 @@ def main() -> int:
                 "validation": validation,
             })
             continue
+
+        # Multiple screenshots may overlap at a page boundary. Deduplicate only
+        # after real provider resolution so we do not accidentally collapse
+        # different competitions or dates.
+        resolved_key = "|".join(str(resolved.get(k, "")) for k in (
+            "competition", "home_canonical", "away_canonical", "match_date", "kickoff"
+        ))
+        if resolved_key in seen_fixture_keys:
+            continue
+        seen_fixture_keys.add(resolved_key)
 
         resolved_kickoff = resolved.get("kickoff")
         if not resolved_kickoff:
@@ -216,6 +240,7 @@ def main() -> int:
         evaluated = evaluate_markets(prediction, visible)
         for candidate in evaluated:
             candidate.update({
+                "source_screenshot": resolved.get("source_screenshot") or fixture.get("source_screenshot"),
                 "competition": resolved.get("competition"),
                 "home": resolved.get("home_canonical") or resolved.get("home"),
                 "away": resolved.get("away_canonical") or resolved.get("away"),
@@ -264,7 +289,8 @@ def main() -> int:
         "engine_version": "V20.79",
         "baseline": "V20.78.52",
         "source": "PelangiEuro",
-        "screenshot": str(args.screenshot),
+        "screenshots": screenshots,
+        "parsed_by_screenshot": parsed_by_screenshot,
         "time_window": args.time_window,
         "time_filter_applied_after_provider_resolution": True,
         "time_filter_mode": "MANUAL",
@@ -275,6 +301,7 @@ def main() -> int:
             "minimum_ev": args.min_ev,
         },
         "counts": {
+            "input_screenshots": len(screenshots),
             "parsed_fixtures": len(fixtures),
             "resolved_fixtures": len(results),
             "unresolved_fixtures": len(unresolved),
