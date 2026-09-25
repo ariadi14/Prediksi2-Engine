@@ -133,7 +133,7 @@ def dedup_key(r: dict) -> str:
     # Do not include kickoff: different sources often encode timezone/rounding
     # differently. Competition remains part of identity so same teams/date in
     # separate competitions are not collapsed.
-    return "|".join([r["date"], norm(r["competition"]), norm(r["home"]), norm(r["away"])])
+    return "|".join([r["date"], norm(r["home"]), norm(r["away"])])
 
 def build(output: Path, inputs: list[Path]):
     conn = sqlite3.connect(output)
