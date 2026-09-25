@@ -283,6 +283,44 @@ class APIFootballProvider:
                         )
                 if stats:
                     out['team_statistics'] = stats
+
+            # Last-five fixture form is the second real-data fallback when
+            # team-season statistics are unavailable (common for some cups,
+            # youth and national-team competitions).
+            recent = {}
+            for side, team_id in (('home', home_id), ('away', away_id)):
+                if not team_id:
+                    continue
+                try:
+                    dr = self.http.get('/fixtures', {'team': team_id, 'last': 5})
+                    rows = dr.get('response', []) if isinstance(dr,dict) else []
+                    gf=[]; ga=[]
+                    for item in rows:
+                        status = ((item.get('fixture') or {}).get('status') or {}).get('short')
+                        if status not in {'FT','AET','PEN'}:
+                            continue
+                        goals = item.get('goals') or {}
+                        gh, ga_ = goals.get('home'), goals.get('away')
+                        if gh is None or ga_ is None:
+                            continue
+                        th = (item.get('teams') or {}).get('home',{}).get('id')
+                        ta = (item.get('teams') or {}).get('away',{}).get('id')
+                        if team_id == th:
+                            gf.append(float(gh)); ga.append(float(ga_))
+                        elif team_id == ta:
+                            gf.append(float(ga_)); ga.append(float(gh))
+                    if gf:
+                        recent[side] = {
+                            'goals_for_avg': sum(gf)/len(gf),
+                            'goals_against_avg': sum(ga)/len(ga),
+                            'sample_size': len(gf),
+                        }
+                except Exception as ex:
+                    out.setdefault('errors',[]).append(
+                        f'recent_fixtures:{side}:{str(ex)[:120]}'
+                    )
+            if recent:
+                out['recent_team_form'] = recent
         except Exception as ex: out['errors']=[str(ex)[:300]]
         return out
 
@@ -363,9 +401,19 @@ def flatten_provider_payload(raw:Dict[str,Any])->Dict[str,Any]:
         out['away_goals_for_away_avg'] = avg_goals(away_stats, 'for')
         out['away_goals_against_away_avg'] = avg_goals(away_stats, 'against')
 
-        # Remove unavailable placeholders rather than converting them to zero.
-        out = {k:v for k,v in out.items() if v is not None}
+    recent = raw.get('recent_team_form') or {}
+    if isinstance(recent,dict):
+        h = recent.get('home') or {}
+        a = recent.get('away') or {}
+        if isinstance(h,dict):
+            out['home_recent_goals_for_avg'] = h.get('goals_for_avg')
+            out['home_recent_goals_against_avg'] = h.get('goals_against_avg')
+        if isinstance(a,dict):
+            out['away_recent_goals_for_avg'] = a.get('goals_for_avg')
+            out['away_recent_goals_against_avg'] = a.get('goals_against_avg')
 
+    # Remove unavailable placeholders rather than converting them to zero.
+    out = {k:v for k,v in out.items() if v is not None}
     return out
 
 class LiveEvidenceEnricher:
