@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-      OPENFOOT_TOKEN: ${{ secrets.OPENFOOT_TOKEN }}
+      FOOTBALL_DATA_CSV_PATH: data/football_data.csv
 
     steps:
       - name: Checkout repository
@@ -82,9 +82,7 @@ jobs:
             echo "ERROR: API_FOOTBALL_KEY GitHub Secret belum tersedia."
             exit 1
           }
-          echo "API-FOOTBALL SECRET: PRESENT"
-
-      - name: Validate batch screenshot input
+          echo "API-FOOTBALL SECRET: PRESENT"\n          echo "OPENFOOT: DISABLED IN V20.79"\n          echo "CSV FALLBACK PATH: ${FOOTBALL_DATA_CSV_PATH}"\n\n      - name: Validate batch screenshot input
         env:
           SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
         run: |
