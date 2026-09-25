@@ -173,6 +173,7 @@ class ProviderAwarePipeline:
                     out['kickoff'] = fixture.get('kickoff') or fixture.get('kickoff_wib')
                     out['provider_competition'] = fixture.get('competition')
                     out['local_historical_evidence_available'] = True
+                    out['skip_live_providers'] = True
                     return out, {
                         'status': 'VALID',
                         'match_mode': 'SCREENSHOT_IDENTITY_LOCAL_HISTORY',
