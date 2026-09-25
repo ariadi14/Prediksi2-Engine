@@ -245,6 +245,13 @@ class APIFootballProvider:
             if not best:return out
             out['fixture_match']=best; fid=best.get('fixture',{}).get('id')
             if not fid:return out
+
+            league = best.get('league') or {}
+            league_id = league.get('id')
+            season = league.get('season')
+            home_id = (best.get('teams') or {}).get('home',{}).get('id')
+            away_id = (best.get('teams') or {}).get('away',{}).get('id')
+
             for path,key in [('/predictions', 'predictions'),('/fixtures/lineups','lineups'),('/injuries','injuries'),('/fixtures/statistics','statistics'),('/fixtures/headtohead','h2h'),('/odds','odds')]:
                 try:
                     if path=='/predictions': d2=self.http.get(path,{'fixture':fid})
@@ -257,6 +264,25 @@ class APIFootballProvider:
                     else: d2=self.http.get(path,{'fixture':fid})
                     out[key]=d2
                 except Exception as ex: out.setdefault('errors',[]).append(str(ex)[:160])
+
+            if league_id and season and home_id and away_id:
+                stats = {}
+                for side, team_id in (('home', home_id), ('away', away_id)):
+                    try:
+                        ds = self.http.get('/teams/statistics', {
+                            'league': league_id,
+                            'season': season,
+                            'team': team_id,
+                        })
+                        response = ds.get('response') if isinstance(ds,dict) else None
+                        if isinstance(response,dict):
+                            stats[side] = response
+                    except Exception as ex:
+                        out.setdefault('errors',[]).append(
+                            f'team_statistics:{side}:{str(ex)[:120]}'
+                        )
+                if stats:
+                    out['team_statistics'] = stats
         except Exception as ex: out['errors']=[str(ex)[:300]]
         return out
 
@@ -310,6 +336,36 @@ def flatten_provider_payload(raw:Dict[str,Any])->Dict[str,Any]:
             if item.get('homeXg') is not None and item.get('awayXg') is not None:
                 try: out['home_xg']=float(item['homeXg']); out['away_xg']=float(item['awayXg']); break
                 except: pass
+
+    # API-Football team-season statistics are a real-data fallback when
+    # provider xG is unavailable. Keep the raw rate fields separate so the
+    # probability engine can combine home scoring with opponent concession
+    # without pretending these rates are xG.
+    team_stats = raw.get('team_statistics') or {}
+    if isinstance(team_stats,dict):
+        home_stats = team_stats.get('home') or {}
+        away_stats = team_stats.get('away') or {}
+        def avg_goals(block, side):
+            goals = block.get('goals') if isinstance(block,dict) else None
+            if not isinstance(goals,dict):
+                return None
+            bucket = goals.get(side) or {}
+            if not isinstance(bucket,dict):
+                return None
+            avg = bucket.get('average')
+            try:
+                return float(avg) if avg is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        out['home_goals_for_home_avg'] = avg_goals(home_stats, 'for')
+        out['home_goals_against_home_avg'] = avg_goals(home_stats, 'against')
+        out['away_goals_for_away_avg'] = avg_goals(away_stats, 'for')
+        out['away_goals_against_away_avg'] = avg_goals(away_stats, 'against')
+
+        # Remove unavailable placeholders rather than converting them to zero.
+        out = {k:v for k,v in out.items() if v is not None}
+
     return out
 
 class LiveEvidenceEnricher:
