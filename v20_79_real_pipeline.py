@@ -185,10 +185,18 @@ def main() -> int:
     # Configure provider throttling before ProviderAwarePipeline creates its
     # API-Football HTTP adapter. This keeps the quota-safe live-evidence
     # experiment explicit and reproducible.
-    if args.api_throttle_seconds is not None:
-        if args.api_throttle_seconds < 0:
+    effective_api_throttle = args.api_throttle_seconds
+    if effective_api_throttle is None:
+        env_throttle = os.getenv("API_FOOTBALL_THROTTLE_SECONDS")
+        if env_throttle not in (None, ""):
+            try:
+                effective_api_throttle = float(env_throttle)
+            except ValueError:
+                raise SystemExit(f"INVALID_API_THROTTLE_SECONDS: {env_throttle}")
+    if effective_api_throttle is not None:
+        if effective_api_throttle < 0:
             raise SystemExit("INVALID_API_THROTTLE_SECONDS: must be >= 0")
-        os.environ["API_FOOTBALL_THROTTLE_SECONDS"] = str(args.api_throttle_seconds)
+        os.environ["API_FOOTBALL_THROTTLE_SECONDS"] = str(effective_api_throttle)
 
     parser = FastPelangiParser()
     fixtures = []
@@ -238,11 +246,17 @@ def main() -> int:
                         "provider": getattr(provider, "name", "unknown"),
                         **diag,
                     })
+            quota_exhausted = any(
+                bool(d.get("api_quota_exhausted"))
+                for d in diagnostics
+                if isinstance(d, dict)
+            )
             unresolved.append({
                 "fixture": fixture,
-                "reason": validation.get("reason", "FIXTURE_REJECTED"),
+                "reason": "API_FOOTBALL_DAILY_QUOTA_EXHAUSTED" if quota_exhausted else validation.get("reason", "FIXTURE_REJECTED"),
                 "validation": validation,
                 "provider_diagnostics": diagnostics,
+                "api_quota_exhausted": quota_exhausted,
             })
             continue
 
@@ -385,7 +399,7 @@ def main() -> int:
         "time_filter_mode": "MANUAL",
         "market_source_locked": True,
         "no_forced_quota": True,
-        "api_throttle_seconds": args.api_throttle_seconds,
+        "api_throttle_seconds": effective_api_throttle,
         "thresholds": {
             "minimum_probability": args.min_probability,
             "minimum_ev": args.min_ev,
