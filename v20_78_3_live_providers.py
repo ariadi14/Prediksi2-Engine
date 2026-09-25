@@ -22,6 +22,12 @@ class JSONHTTP:
         if params:
             url += ('&' if '?' in url else '?') + urlencode({k:v for k,v in params.items() if v is not None})
         headers={"Accept":"application/json"}
+        # OpenFoot is fronted by Cloudflare. Python urllib otherwise sends
+        # its default Python-urllib/<version> signature, which the API edge
+        # may reject before the API can return its documented JSON error.
+        # Use an explicit, stable application UA; do not retry/bypass 403s.
+        if "openfootapi.com" in self.base_url:
+            headers["User-Agent"] = "Prediksi2-Engine/20.79 (+https://github.com/ariadi14/Prediksi2-Engine)"
         if self.token:
             if self.token_header.lower()=="authorization": headers[self.token_header]="Bearer "+self.token
             else: headers[self.token_header]=self.token
