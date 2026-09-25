@@ -49,6 +49,18 @@ def expected_goals(e: Dict[str,Any], side:str)->Optional[float]:
             if x>=0:return x
         except: pass
 
+    # API-Football can provide an explicit predicted-goals value even
+    # when xG/team-season statistics are unavailable. This is provider model
+    # output, not a fabricated baseline, so it is used only as a fallback.
+    predicted=e.get(f"{side}_predicted_goals")
+    if predicted is not None:
+        try:
+            value=float(predicted)
+            if value >= 0:
+                return max(0.05, value)
+        except (TypeError, ValueError):
+            pass
+
     if side=="home":
         attack_avg=e.get("home_goals_for_home_avg")
         concede_avg=e.get("away_goals_against_away_avg")
