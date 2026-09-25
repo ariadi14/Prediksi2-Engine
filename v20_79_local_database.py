@@ -133,7 +133,7 @@ def dedup_key(r: dict) -> str:
     # Do not include kickoff: different sources often encode timezone/rounding
     # differently. Competition remains part of identity so same teams/date in
     # separate competitions are not collapsed.
-    return "|".join([r["date"], norm(r["home"]), norm(r["away"])])
+    return "|".join([r["date"], norm(r.get("competition","")), norm(r["home"]), norm(r["away"])])
 
 def build(output: Path, inputs: list[Path]):
     conn = sqlite3.connect(output)
@@ -160,8 +160,8 @@ def build(output: Path, inputs: list[Path]):
                      home_goals,away_goals,home_team_norm,away_team_norm,source,source_path,dedup_key)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (r["date"],r.get("kickoff"),r.get("country",""),r["competition"],
-                     r["home"],r["away"],r.get("hg"),r.get("ag"),r["source"],
-                     r["path"],k,k and norm(r["home"]),norm(r["away"])))
+                     r["home"],r["away"],r.get("hg"),r.get("ag"),norm(r["home"]),
+                     norm(r["away"]),r["source"],r["path"],k))
                 seen.add(k); stats["inserted"] += 1
             except sqlite3.IntegrityError:
                 stats["duplicates"] += 1
