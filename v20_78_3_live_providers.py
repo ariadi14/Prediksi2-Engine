@@ -6,11 +6,14 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, List
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-import json, os
+import json, os, time
 
 class JSONHTTP:
     def __init__(self, base_url:str, token:Optional[str]=None, token_header:str="Authorization", timeout:int=12):
         self.base_url=base_url.rstrip('/'); self.token=token; self.token_header=token_header; self.timeout=timeout
+        self.throttle_seconds = float(os.getenv("API_FOOTBALL_THROTTLE_SECONDS", "0")) if "api-sports.io" in self.base_url else 0.0
+        self._last_request_at = 0.0
+        self.rate_limit_diagnostics = {}
     def get(self, path:str, params:Optional[Dict[str,Any]]=None):
         url=self.base_url+path
         if params:
@@ -19,9 +22,22 @@ class JSONHTTP:
         if self.token:
             if self.token_header.lower()=="authorization": headers[self.token_header]="Bearer "+self.token
             else: headers[self.token_header]=self.token
+        if self.throttle_seconds > 0 and self._last_request_at:
+            wait = self.throttle_seconds - (time.monotonic() - self._last_request_at)
+            if wait > 0:
+                time.sleep(wait)
         req=Request(url,headers=headers,method="GET")
-        with urlopen(req,timeout=self.timeout) as r:
-            return json.loads(r.read().decode('utf-8'))
+        try:
+            with urlopen(req,timeout=self.timeout) as r:
+                self._last_request_at = time.monotonic()
+                for k,v in r.headers.items():
+                    lk=k.lower()
+                    if lk in {"x-ratelimit-requests-limit","x-ratelimit-requests-remaining","x-ratelimit-limit","x-ratelimit-remaining"}:
+                        self.rate_limit_diagnostics[lk] = v
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as exc:
+            self._last_request_at = time.monotonic()
+            raise exc
 
 class OpenFootProvider:
     name="openfoot"
@@ -269,14 +285,31 @@ class APIFootballProvider:
             home_id = (best.get('teams') or {}).get('home',{}).get('id')
             away_id = (best.get('teams') or {}).get('away',{}).get('id')
 
-            # Evidence endpoints are limited to data useful for probability.
-            # Market odds remain locked to PelangiEuro and are never sourced
-            # from the provider. Cached fixture reuse removes one request.
+            # Quota-safe evidence strategy:
+            # 1) predictions is the highest-value probability endpoint.
+            # 2) If it already supplies both predicted goals, stop immediately.
+            # 3) Only then fall back to the broader evidence set.
             endpoint_diagnostics = {}
-            for path,key in [('/predictions', 'predictions'),('/fixtures/lineups','lineups'),('/injuries','injuries'),('/fixtures/statistics','statistics'),('/fixtures/headtohead','h2h')]:
+            try:
+                d2 = self.http.get('/predictions', {'fixture': fid})
+                out['predictions'] = d2
+                response = d2.get('response') if isinstance(d2, dict) else None
+                endpoint_diagnostics['predictions'] = {
+                    'response_count': len(response) if isinstance(response, list) else (1 if isinstance(response, dict) else 0),
+                    'errors': d2.get('errors') or [] if isinstance(d2, dict) else [],
+                }
+                pred = response[0] if isinstance(response, list) and response else None
+                goals = pred.get('goals') if isinstance(pred, dict) else None
+                if isinstance(goals, dict) and goals.get('home') is not None and goals.get('away') is not None:
+                    out['endpoint_diagnostics'] = endpoint_diagnostics
+                    out['rate_limit_diagnostics'] = dict(getattr(self.http, 'rate_limit_diagnostics', {}))
+                    return out
+            except Exception as ex:
+                endpoint_diagnostics['predictions'] = {'response_count': 0, 'errors': [str(ex)[:160]]}
+
+            for path,key in [('/fixtures/lineups','lineups'),('/injuries','injuries'),('/fixtures/statistics','statistics'),('/fixtures/headtohead','h2h')]:
                 try:
-                    if path=='/predictions': d2=self.http.get(path,{'fixture':fid})
-                    elif path=='/fixtures/lineups': d2=self.http.get(path,{'fixture':fid})
+                    if path=='/fixtures/lineups': d2=self.http.get(path,{'fixture':fid})
                     elif path=='/injuries': d2=self.http.get(path,{'fixture':fid})
                     elif path=='/fixtures/statistics': d2=self.http.get(path,{'fixture':fid})
                     elif path=='/fixtures/headtohead':
@@ -357,7 +390,10 @@ class APIFootballProvider:
             if recent:
                 out['recent_team_form'] = recent
             out['recent_form_diagnostics'] = recent_diagnostics
-        except Exception as ex: out['errors']=[str(ex)[:300]]
+            out['rate_limit_diagnostics'] = dict(getattr(self.http, 'rate_limit_diagnostics', {}))
+        except Exception as ex:
+            out['errors']=[str(ex)[:300]]
+            out['rate_limit_diagnostics'] = dict(getattr(self.http, 'rate_limit_diagnostics', {}))
         return out
 
 def flatten_provider_payload(raw:Dict[str,Any])->Dict[str,Any]:

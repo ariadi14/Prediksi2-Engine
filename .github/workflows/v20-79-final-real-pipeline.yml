@@ -32,6 +32,16 @@ on:
         required: true
         default: "0.02"
         type: string
+      max_evidence_fixtures:
+        description: "Safety cap evidence live: 1 untuk uji hemat kuota; 0 = unlimited"
+        required: true
+        default: "1"
+        type: string
+      api_throttle_seconds:
+        description: "Jeda antar request API-Football; 6.2 aman untuk batas 10 request/menit"
+        required: true
+        default: "6.2"
+        type: string
 
 permissions:
   contents: read
@@ -130,6 +140,8 @@ jobs:
           TIME_WINDOW: ${{ inputs.time_window }}
           MIN_PROBABILITY: ${{ inputs.minimum_probability }}
           MIN_EV: ${{ inputs.minimum_ev }}
+          MAX_EVIDENCE_FIXTURES: ${{ inputs.max_evidence_fixtures }}
+          API_FOOTBALL_THROTTLE_SECONDS: ${{ inputs.api_throttle_seconds }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -146,7 +158,7 @@ jobs:
               SCREENSHOT_ARGS+=( "$screenshot" )
           done
 
-          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --fixture-date "$FIXTURE_DATE"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --output artifacts/v20_79_final_output.json
+          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --fixture-date "$FIXTURE_DATE"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --max-evidence-fixtures "$MAX_EVIDENCE_FIXTURES"             --output artifacts/v20_79_final_output.json
 
       - name: Validate FINAL output safety
         run: |
