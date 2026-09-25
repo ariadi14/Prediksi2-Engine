@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, List
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 import json, os, time
 
 class JSONHTTP:
@@ -15,6 +16,7 @@ class JSONHTTP:
         self._last_request_at = 0.0
         self.rate_limit_diagnostics = {}
         self.api_quota_exhausted = False
+        self.last_error_diagnostics = {}
     def get(self, path:str, params:Optional[Dict[str,Any]]=None):
         url=self.base_url+path
         if params:
@@ -50,9 +52,41 @@ class JSONHTTP:
                     self.rate_limit_diagnostics["quota_exhausted"] = True
                     self.rate_limit_diagnostics["quota_error"] = str(errors)[:500]
                 return payload
+        except HTTPError as exc:
+            self._last_request_at = time.monotonic()
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            error_obj = None
+            try:
+                parsed = json.loads(body) if body else {}
+                error_obj = parsed.get("error") if isinstance(parsed, dict) else None
+            except Exception:
+                error_obj = None
+            self.last_error_diagnostics = {
+                "status_code": int(getattr(exc, "code", 0) or 0),
+                "error_code": (error_obj or {}).get("code") if isinstance(error_obj, dict) else None,
+                "error_message": (error_obj or {}).get("message") if isinstance(error_obj, dict) else None,
+                "response_body": body[:1000],
+                "rate_limit_diagnostics": dict(self.rate_limit_diagnostics),
+            }
+            raise RuntimeError(
+                "HTTP %s: %s" % (
+                    self.last_error_diagnostics["status_code"],
+                    self.last_error_diagnostics.get("error_code") or self.last_error_diagnostics.get("error_message") or "request_failed"
+                )
+            ) from exc
         except Exception as exc:
             self._last_request_at = time.monotonic()
-            raise exc
+            self.last_error_diagnostics = {
+                "status_code": None,
+                "error_code": type(exc).__name__,
+                "error_message": str(exc)[:1000],
+                "rate_limit_diagnostics": dict(self.rate_limit_diagnostics),
+            }
+            raise
 
 class OpenFootProvider:
     name="openfoot"
@@ -117,6 +151,7 @@ class OpenFootProvider:
             self._last_fixture_lookup={
                 'date':date,'rows':0,'error':str(ex)[:300],
                 'exception_type':type(ex).__name__,
+                'error_diagnostics':dict(getattr(self.http,'last_error_diagnostics',{})),
                 'rate_limit_diagnostics':dict(getattr(self.http,'rate_limit_diagnostics',{})),
             }
             self._fixture_date_cache[date]=[]
@@ -182,6 +217,7 @@ class OpenFootProvider:
             out['rate_limit_diagnostics']=dict(getattr(self.http,'rate_limit_diagnostics',{}))
         except Exception as ex:
             out['errors']=[str(ex)[:300]]
+            out['error_diagnostics']=dict(getattr(self.http,'last_error_diagnostics',{}))
             out['rate_limit_diagnostics']=dict(getattr(self.http,'rate_limit_diagnostics',{}))
         return out
 
