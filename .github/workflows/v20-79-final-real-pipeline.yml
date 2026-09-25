@@ -158,7 +158,7 @@ jobs:
               SCREENSHOT_ARGS+=( "$screenshot" )
           done
 
-          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --fixture-date "$FIXTURE_DATE"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --max-evidence-fixtures "$MAX_EVIDENCE_FIXTURES"             --output artifacts/v20_79_final_output.json
+          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --fixture-date "$FIXTURE_DATE"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --max-evidence-fixtures "$MAX_EVIDENCE_FIXTURES"             --api-throttle-seconds "$API_FOOTBALL_THROTTLE_SECONDS"             --output artifacts/v20_79_final_output.json
 
       - name: Validate FINAL output safety
         run: |
