@@ -64,6 +64,20 @@ def expected_goals(e: Dict[str,Any], side:str)->Optional[float]:
         except (TypeError, ValueError):
             pass
 
+    if side=="home":
+        recent_attack=e.get("home_recent_goals_for_avg")
+        recent_concede=e.get("away_recent_goals_against_avg")
+    else:
+        recent_attack=e.get("away_recent_goals_for_avg")
+        recent_concede=e.get("home_recent_goals_against_avg")
+    if recent_attack is not None and recent_concede is not None:
+        try:
+            a=float(recent_attack); c=float(recent_concede)
+            if a>=0 and c>=0:
+                return max(0.05, (a+c)/2.0)
+        except (TypeError, ValueError):
+            pass
+
     attack=e.get(f"{side}_attack")
     opp="away" if side=="home" else "home"
     defence=e.get(f"{opp}_defence")
