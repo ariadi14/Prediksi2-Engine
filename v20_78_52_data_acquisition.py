@@ -268,3 +268,66 @@ class FootballDataFixtureCSV:
             "historical_home_matches_used": len(home_hist),
             "historical_away_matches_used": len(away_hist),
         }
+
+
+class LocalFootballDatabase:
+    """Read-only SQLite evidence provider built by v20_79_local_database.py.
+
+    It supplies historical team evidence only. Fixture resolution remains
+    authoritative through API-Football or a future fixture-schedule table.
+    """
+    name = "football-local-db"
+
+    def __init__(self, path: Optional[str] = None):
+        self.path = path or os.getenv("FOOTBALL_DATABASE_PATH", "data/database/football.db")
+
+    def available(self) -> bool:
+        return os.path.isfile(self.path)
+
+    @staticmethod
+    def _norm(value: Any) -> str:
+        import re, unicodedata
+        x = unicodedata.normalize("NFKD", str(value or ""))
+        x = "".join(ch for ch in x if not unicodedata.combining(ch))
+        return re.sub(r"[^a-z0-9]", "", x.lower())
+
+    def fetch(self, fixture: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.available():
+            return {}
+        home = fixture.get("home_canonical") or fixture.get("home")
+        away = fixture.get("away_canonical") or fixture.get("away")
+        target = str(fixture.get("match_date") or "")
+        if not home or not away or not target:
+            return {}
+        hn, an = self._norm(home), self._norm(away)
+        conn = sqlite3.connect(self.path)
+        try:
+            def team_rows(team_norm: str, home_only: bool):
+                col = "home_team_norm" if home_only else "away_team_norm"
+                return conn.execute(
+                    f"""SELECT match_date,home_goals,away_goals
+                        FROM matches
+                        WHERE {col}=? AND match_date < ?
+                          AND home_goals IS NOT NULL AND away_goals IS NOT NULL
+                        ORDER BY match_date DESC LIMIT 20""",
+                    (team_norm, target),
+                ).fetchall()
+            hrows = team_rows(hn, True)
+            arows = team_rows(an, False)
+            if not hrows or not arows:
+                return {}
+            import statistics
+            return {
+                "fixture_match": {"id": fixture.get("fixture_id"),
+                                  "homeTeam": {"name": home},
+                                  "awayTeam": {"name": away}},
+                "home_goals_for_home_avg": statistics.mean(r[1] for r in hrows),
+                "home_goals_against_home_avg": statistics.mean(r[2] for r in hrows),
+                "away_goals_for_away_avg": statistics.mean(r[2] for r in arows),
+                "away_goals_against_away_avg": statistics.mean(r[1] for r in arows),
+                "historical_db_source": self.path,
+                "historical_home_matches_used": len(hrows),
+                "historical_away_matches_used": len(arows),
+            }
+        finally:
+            conn.close()
