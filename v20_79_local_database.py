@@ -22,15 +22,14 @@ CREATE TABLE IF NOT EXISTS matches (
  away_team TEXT NOT NULL,
  home_goals INTEGER,
  away_goals INTEGER,
+ home_team_norm TEXT NOT NULL,
+ away_team_norm TEXT NOT NULL,
  source TEXT NOT NULL,
  source_path TEXT NOT NULL,
  source_updated_at TEXT,
  dedup_key TEXT NOT NULL UNIQUE
 );
-CREATE INDEX IF NOT EXISTS idx_matches_teams_date
- ON matches(match_date, home_team_norm, away_team_norm);
-CREATE INDEX IF NOT EXISTS idx_matches_home_date ON matches(home_team_norm, match_date);
-CREATE INDEX IF NOT EXISTS idx_matches_away_date ON matches(away_team_norm, match_date);
+
 """
 
 def norm(value: str) -> str:
@@ -138,13 +137,7 @@ def dedup_key(r: dict) -> str:
 
 def build(output: Path, inputs: list[Path]):
     conn = sqlite3.connect(output)
-    conn.executescript(SCHEMA.replace("home_team_norm", "home_team"))
-    # Compatibility columns used by the indexes above.
-    try:
-        conn.execute("ALTER TABLE matches ADD COLUMN home_team_norm TEXT")
-        conn.execute("ALTER TABLE matches ADD COLUMN away_team_norm TEXT")
-    except sqlite3.OperationalError:
-        pass
+    conn.executescript(SCHEMA)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_matches_teams_date ON matches(match_date,home_team_norm,away_team_norm)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_matches_home_date ON matches(home_team_norm,match_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_matches_away_date ON matches(away_team_norm,match_date)")
@@ -164,9 +157,8 @@ def build(output: Path, inputs: list[Path]):
             try:
                 conn.execute("""INSERT INTO matches
                     (match_date,kickoff,country,competition,home_team,away_team,
-                     home_goals,away_goals,source,source_path,dedup_key,
-                     home_team_norm,away_team_norm)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     home_goals,away_goals,home_team_norm,away_team_norm,source,source_path,dedup_key)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (r["date"],r.get("kickoff"),r.get("country",""),r["competition"],
                      r["home"],r["away"],r.get("hg"),r.get("ag"),r["source"],
                      r["path"],k,k and norm(r["home"]),norm(r["away"])))
