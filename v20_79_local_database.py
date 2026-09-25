@@ -158,7 +158,7 @@ def build(output: Path, inputs: list[Path]):
                 conn.execute("""INSERT INTO matches
                     (match_date,kickoff,country,competition,home_team,away_team,
                      home_goals,away_goals,home_team_norm,away_team_norm,source,source_path,dedup_key)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (r["date"],r.get("kickoff"),r.get("country",""),r["competition"],
                      r["home"],r["away"],r.get("hg"),r.get("ag"),norm(r["home"]),
                      norm(r["away"]),r["source"],r["path"],k))
