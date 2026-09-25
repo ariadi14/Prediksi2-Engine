@@ -98,4 +98,4 @@ def test_parser_market_columns_scale_with_screenshot_width():
     assert wide["ou"][1] == 915.0
     assert wide["hdp"][0] == 915.0
     assert wide["hdp"][1] == 1035.0
-\n
+
