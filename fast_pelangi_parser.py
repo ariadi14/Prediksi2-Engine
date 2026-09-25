@@ -111,8 +111,22 @@ def _parse_hdp_line(raw):
 class FastPelangiParser:
     def __init__(self,min_conf=12): self.min_conf=min_conf
 
-    def _left_lines(self,df):
-        d=df[(df.left<430)&(df.top>210)&(df.text.astype(str).str.contains('[A-Za-z]',regex=True))].copy()
+    @staticmethod
+    def _columns(width:int):
+        # PelangiEuro screenshots can be captured at different device widths.
+        # Normalize the proven 720px market layout so wider screenshots keep
+        # the 1X2/O-U/HDP columns inside the OCR crop.
+        scale=max(1.0, float(width)/720.0)
+        return {
+            'left': 430.0*scale,
+            'one': (415.0*scale, 505.0*scale),
+            'ou': (505.0*scale, 610.0*scale),
+            'hdp': (610.0*scale, 690.0*scale),
+            'hdp_line': (500.0*scale, 600.0*scale),
+        }
+
+    def _left_lines(self,df,left_limit=430):
+        d=df[(df.left<left_limit)&(df.top>210)&(df.text.astype(str).str.contains('[A-Za-z]',regex=True))].copy()
         lines=[]
         for (_,_,_),g in d.groupby(['block_num','par_num','line_num']):
             text=clean(' '.join(g.sort_values('left').text))
@@ -153,10 +167,16 @@ class FastPelangiParser:
         # Start slightly above the normal table crop so a fixture that begins
         # near the top of a screenshot is not lost. The line parser ignores
         # browser/navigation noise until a competition header is detected.
-        left=self._data(path,0,430,y1=220); right=self._data(path,410,690,y1=220)
+        from PIL import Image
+        width=Image.open(path).width
+        cols=self._columns(width)
+        left=self._data(path,0,int(cols['left']),y1=220)
+        right_start=max(0,int(cols['one'][0]-8))
+        right_end=min(width,int(cols['hdp'][1]+8))
+        right=self._data(path,right_start,right_end,y1=220)
         left['top']=left['top']/2+220; left['left']=left['left']/2
-        right['top']=right['top']/2+220; right['left']=right['left']/2+410
-        df=right; lines=self._left_lines(left); comp=self._top_header(path) or carry or 'UNKNOWN'; rows=[]; pending=[]; pending_kickoff=None
+        right['top']=right['top']/2+220; right['left']=right['left']/2+right_start
+        df=right; lines=self._left_lines(left,cols['left']); comp=self._top_header(path) or carry or 'UNKNOWN'; rows=[]; pending=[]; pending_kickoff=None
         for y,text in lines:
             if _is_header(text):
                 comp=text; pending=[]; continue
@@ -181,17 +201,17 @@ class FastPelangiParser:
                     for v in sorted(out,key=lambda x:(x[1],x[0])):
                         if (v[0],v[1]) not in seen: seen.add((v[0],v[1])); a.append(v)
                     return a
-                one=vals(415,505); hdp=vals(610,690); hline=None; htexts=[]
+                one=vals(cols['one'][0],cols['one'][1]); hdp=vals(cols['hdp'][0],cols['hdp'][1]); hline=None; htexts=[]
                 for _,r in df.iterrows():
-                    if 500<=r.left<600 and gy-75<=r.top<=gy+10:
+                    if cols['hdp_line'][0]<=r.left<cols['hdp_line'][1] and gy-75<=r.top<=gy+10:
                         t=clean(str(r.text))
                         if ':' in t or re.search(r'\d',t): htexts.append(t)
                 if htexts: hline=_parse_hdp_line(' '.join(htexts))
                 markets=[]
-                ou=vals(505,610)
+                ou=vals(cols['ou'][0],cols['ou'][1])
                 outexts=[]
                 for _,r in df.iterrows():
-                    if 505<=r.left<610 and gy-75<=r.top<=gy+10:
+                    if cols['ou'][0]<=r.left<cols['ou'][1] and gy-75<=r.top<=gy+10:
                         t=clean(str(r.text))
                         if t:
                             outexts.append(t)
@@ -236,13 +256,13 @@ class FastPelangiParser:
                     if (v[0],v[1]) not in seen:
                         seen.add((v[0],v[1])); out2.append(v)
                 return out2
-            one=vals2(415,505); ou=vals2(505,610); hd=vals2(610,690)
+            one=vals2(cols['one'][0],cols['one'][1]); ou=vals2(cols['ou'][0],cols['ou'][1]); hd=vals2(cols['hdp'][0],cols['hdp'][1])
             htxt=[]; otxt=[]
             for _,rr in df.iterrows():
-                if 500<=rr.left<600 and gy-75<=rr.top<=gy+20:
+                if cols['hdp_line'][0]<=rr.left<cols['hdp_line'][1] and gy-75<=rr.top<=gy+20:
                     t=clean(str(rr.text))
                     if t: htxt.append(t)
-                if 505<=rr.left<610 and gy-75<=rr.top<=gy+20:
+                if cols['ou'][0]<=rr.left<cols['ou'][1] and gy-75<=rr.top<=gy+20:
                     t=clean(str(rr.text))
                     if t: otxt.append(t)
             hline=_parse_hdp_line(' '.join(htxt))
