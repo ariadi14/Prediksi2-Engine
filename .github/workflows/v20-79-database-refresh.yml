@@ -1,0 +1,41 @@
+name: V20.79 - DATABASE REFRESH
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 0,3"
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build database
+        run: |
+          set -euo pipefail
+          python v20_79_build_public_database.py --output data/database/football.db
+          python - <<'PY'
+          import sqlite3
+          c=sqlite3.connect("data/database/football.db")
+          n=c.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+          s=c.execute("SELECT COUNT(*) FROM matches WHERE home_goals IS NOT NULL AND away_goals IS NOT NULL").fetchone()[0]
+          print({"matches": n, "scored": s})
+          assert n > 0
+          c.close()
+          PY
+
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v20-79-football-database
+          path: data/database/football.db
