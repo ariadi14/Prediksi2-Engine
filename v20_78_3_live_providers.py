@@ -58,31 +58,131 @@ class OpenFootProvider:
     name="openfoot"
     def __init__(self, token:Optional[str]=None):
         self.http=JSONHTTP("https://openfootapi.com",token)
+        self._fixture_date_cache={}
+        self._last_fixture_lookup={}
+
+    @staticmethod
+    def _norm(value):
+        import unicodedata, re
+        x=unicodedata.normalize('NFKD',str(value or ''))
+        x=''.join(c for c in x if not unicodedata.combining(c))
+        return re.sub(r'[^a-z0-9]','',x.lower())
+
     def _search(self,q):
         try:
             d=self.http.get('/v1/search',{'q':q})
             return d.get('data',[]) if isinstance(d,dict) else []
-        except Exception:return []
-    def fetch(self,fixture):
-        home=fixture.get('home'); away=fixture.get('away')
-        out={"provider":"openfoot","fixture_match":None}
-        if not home or not away:return out
-        matches=[]
+        except Exception:
+            return []
+
+    def resolve_team(self,name):
+        rows=[x for x in self._search(name) if isinstance(x,dict) and x.get('id')]
+        if not rows:
+            return {'status':'UNRESOLVED','raw':name}
+        from rapidfuzz import fuzz
+        scored=sorted(
+            [(max(fuzz.ratio(self._norm(name),self._norm(x.get('name'))),
+                  fuzz.WRatio(self._norm(name),self._norm(x.get('name')))),x) for x in rows],
+            key=lambda z:z[0], reverse=True)
+        score,row=scored[0]
+        second=scored[1][0] if len(scored)>1 else 0.0
+        if score < 80 or (len(scored)>1 and score-second < 8):
+            return {'status':'AMBIGUOUS','raw':name,'score':round(score,1),'second_score':round(second,1)}
+        return {
+            'status':'RESOLVED_HIGH' if score>=92 else 'RESOLVED_MEDIUM',
+            'raw':name,
+            'canonical_name':row.get('name'),
+            'score':round(score,1),
+            'second_score':round(second,1),
+            'provider_ids':{'openfoot':row.get('id')},
+            'country':row.get('country'),
+        }
+
+    def _matches_for_date(self,date):
+        if not date: return []
+        if date in self._fixture_date_cache: return self._fixture_date_cache[date]
         try:
-            # Search by both team names; provider search is used only to resolve stable IDs.
-            hs=self._search(home); as_=self._search(away)
-            hid=hs[0].get('id') if hs else None; aid=as_[0].get('id') if as_ else None
-            q=' '.join([home,away]).strip()
-            ms=self._search(q)
-            for m in ms:
-                if isinstance(m,dict) and ('homeTeam' in m or 'awayTeam' in m): matches.append(m)
-            if matches:
-                m=matches[0]; out['fixture_match']=m; mid=m.get('id')
-                if mid:
-                    for path,key in [('/v1/matches/{}/xg','xg'),('/v1/matches/{}/lineups','lineups'),('/v1/odds?matchId={}','odds')]:
-                        try: out[key]=self.http.get(path.format(mid))
-                        except Exception: pass
-        except Exception: pass
+            d=self.http.get('/v1/matches',{'date':date})
+            rows=d.get('data',[]) if isinstance(d,dict) else []
+            self._fixture_date_cache[date]=rows if isinstance(rows,list) else []
+            self._last_fixture_lookup={
+                'date':date,
+                'rows':len(self._fixture_date_cache[date]),
+                'error':None,
+                'api_errors':d.get('error') if isinstance(d,dict) else None,
+                'rate_limit_diagnostics':dict(getattr(self.http,'rate_limit_diagnostics',{})),
+            }
+            return self._fixture_date_cache[date]
+        except Exception as ex:
+            self._last_fixture_lookup={
+                'date':date,'rows':0,'error':str(ex)[:300],
+                'exception_type':type(ex).__name__,
+                'rate_limit_diagnostics':dict(getattr(self.http,'rate_limit_diagnostics',{})),
+            }
+            self._fixture_date_cache[date]=[]
+            return []
+
+    def find_fixture(self,fixture):
+        home=fixture.get('home_canonical') or fixture.get('home')
+        away=fixture.get('away_canonical') or fixture.get('away')
+        date=fixture.get('match_date')
+        if not home or not away or not date: return []
+        rows=self._matches_for_date(date)
+        from rapidfuzz import fuzz
+        hn,an=self._norm(home),self._norm(away)
+        scored=[]
+        for m in rows:
+            h=(m.get('homeTeam') or {})
+            a=(m.get('awayTeam') or {})
+            hs,aws=self._norm(h.get('name')),self._norm(a.get('name'))
+            hs_score=max(fuzz.ratio(hn,hs),fuzz.WRatio(hn,hs))
+            as_score=max(fuzz.ratio(an,aws),fuzz.WRatio(an,aws))
+            if hs_score>=82 and as_score>=82:
+                kickoff=str(m.get('kickoffAt') or '')
+                scored.append((hs_score+as_score,{
+                    'fixture_id':m.get('id'),
+                    'home_name':h.get('name'),
+                    'away_name':a.get('name'),
+                    'date':kickoff[:10] or date,
+                    'kickoff_utc':kickoff,
+                    'competition':m.get('competitionName') or m.get('competitionId'),
+                    'home_id':h.get('id'),
+                    'away_id':a.get('id'),
+                    'match_mode':'STRONG_BOTH',
+                }))
+        scored.sort(key=lambda x:x[0],reverse=True)
+        self._last_fixture_lookup.update({
+            'requested_home':home,'requested_away':away,
+            'candidate_count':len(scored),
+            'best_fixture_id':scored[0][1].get('fixture_id') if scored else None,
+            'best_home_name':scored[0][1].get('home_name') if scored else None,
+            'best_away_name':scored[0][1].get('away_name') if scored else None,
+            'best_home_score':round(scored[0][1].get('home_score',0),1) if scored else None,
+            'best_away_score':round(scored[0][1].get('away_score',0),1) if scored else None,
+            'unique_match':len(scored)==1,
+        })
+        if len(scored)==1:
+            return [scored[0][1]]
+        return [scored[0][1]] if scored and scored[0][0]>=170 else []
+
+    def fetch(self,fixture):
+        home=fixture.get('home_canonical') or fixture.get('home')
+        away=fixture.get('away_canonical') or fixture.get('away')
+        out={'provider':'openfoot','fixture_match':None}
+        if not home or not away: return out
+        try:
+            mid=fixture.get('fixture_id')
+            if not mid:
+                found=self.find_fixture(fixture)
+                mid=found[0].get('fixture_id') if found else None
+            if not mid: return out
+            out['fixture_match']={'id':mid,'homeTeam':{'name':home},'awayTeam':{'name':away}}
+            context=self.http.get(f'/v1/matches/{mid}/context')
+            out['context']=context
+            out['rate_limit_diagnostics']=dict(getattr(self.http,'rate_limit_diagnostics',{}))
+        except Exception as ex:
+            out['errors']=[str(ex)[:300]]
+            out['rate_limit_diagnostics']=dict(getattr(self.http,'rate_limit_diagnostics',{}))
         return out
 
 class APIFootballProvider:
