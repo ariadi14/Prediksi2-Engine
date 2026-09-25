@@ -33,8 +33,14 @@ def poisson_pmf(k:int, lam:float)->float:
 
 
 def expected_goals(e: Dict[str,Any], side:str)->Optional[float]:
-    """Estimate lambda from explicit xG or attack/defence inputs.
-    xG is preferred; otherwise attack*opponent defence*home factor.
+    """Estimate scoring rate from explicit provider evidence.
+
+    Priority:
+    1) provider xG when explicitly available;
+    2) home/away scoring + opponent concession averages from real
+       API-Football team-season statistics;
+    3) legacy attack*defence evidence.
+    The statistics fallback is a rate estimate, not relabeled as xG.
     """
     xg=e.get(f"{side}_xg")
     if xg is not None:
@@ -42,6 +48,22 @@ def expected_goals(e: Dict[str,Any], side:str)->Optional[float]:
             x=float(xg)
             if x>=0:return x
         except: pass
+
+    if side=="home":
+        attack_avg=e.get("home_goals_for_home_avg")
+        concede_avg=e.get("away_goals_against_away_avg")
+    else:
+        attack_avg=e.get("away_goals_for_away_avg")
+        concede_avg=e.get("home_goals_against_home_avg")
+
+    if attack_avg is not None and concede_avg is not None:
+        try:
+            a=float(attack_avg); c=float(concede_avg)
+            if a>=0 and c>=0:
+                return max(0.05, (a+c)/2.0)
+        except (TypeError, ValueError):
+            pass
+
     attack=e.get(f"{side}_attack")
     opp="away" if side=="home" else "home"
     defence=e.get(f"{opp}_defence")
