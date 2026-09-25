@@ -58,6 +58,13 @@ class EvidenceService:
 
         for p in self.providers:
             name = getattr(p, 'name', p.__class__.__name__)
+            if fixture.get('skip_live_providers') and name == 'api-football':
+                attempts.append({
+                    'provider': name,
+                    'ok': False,
+                    'errors': ['SKIPPED_AFTER_API_FOOTBALL_DAILY_QUOTA_EXHAUSTED'],
+                })
+                continue
             try:
                 raw = p.fetch(fixture) or {}
                 flat = flatten_provider_payload(raw)
