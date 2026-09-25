@@ -257,6 +257,7 @@ def main() -> int:
                 "fixture": resolved,
                 "reason": provider_evidence.get("reason", "EVIDENCE_UNAVAILABLE"),
                 "validation": validation,
+                "provider_evidence_diagnostics": provider_evidence.get("providers", []),
             })
             continue
         evidence_enriched += 1
