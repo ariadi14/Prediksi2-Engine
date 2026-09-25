@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       screenshot_paths:
-        description: "Path screenshot PelangiEuro di repository, pisahkan dengan koma untuk batch"
+        description: "Isi hanya nama/path file screenshot, pisahkan dengan koma. Contoh: Screenshot_20260924-213851.jpg,Screenshot_20260924-213856.jpg"
         required: true
         type: string
       fixture_date:
@@ -82,7 +82,13 @@ jobs:
           import sys
           from PIL import Image
 
-          paths = [x.strip() for x in sys.argv[1].split(",") if x.strip()]
+          raw = sys.argv[1].strip()
+          # Toleransi terhadap input yang ditempel bersama label field.
+          if ":" in raw:
+              prefix, candidate = raw.split(":", 1)
+              if prefix.strip().lower() in {"screenshot paths", "screenshot_path", "screenshot_paths"}:
+                  raw = candidate.strip()
+          paths = [x.strip().strip(chr(34)).strip(chr(39)) for x in raw.split(",") if x.strip()]
           if not paths:
               raise SystemExit("ERROR: screenshot_paths kosong.")
 
@@ -128,6 +134,8 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
 
+          # Toleransi terhadap input yang ditempel bersama label field.
+          SCREENSHOT_PATHS="$(printf '%s' "$SCREENSHOT_PATHS" | sed -E 's/^[[:space:]]*(Screenshot paths|screenshot_path|screenshot_paths)[[:space:]]*:[[:space:]]*//I')"
           IFS=',' read -r -a SCREENSHOTS <<< "$SCREENSHOT_PATHS"
           test "${#SCREENSHOTS[@]}" -gt 0
 
