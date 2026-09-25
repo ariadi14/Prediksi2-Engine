@@ -120,8 +120,8 @@ jobs:
       - name: Run regression tests
         run: |
           set -euo pipefail
-          pytest -q test_v20_79_real_pipeline.py
-          echo "V20.79 REGRESSION TESTS: PASS"
+          pytest -q test_v20_79_real_pipeline.py v20_78_39_test.py
+          echo "V20.79 + EVIDENCE GATE REGRESSION TESTS: PASS"
 
       - name: Run FINAL REAL pipeline
         env:
