@@ -272,6 +272,7 @@ class APIFootballProvider:
             # Evidence endpoints are limited to data useful for probability.
             # Market odds remain locked to PelangiEuro and are never sourced
             # from the provider. Cached fixture reuse removes one request.
+            endpoint_diagnostics = {}
             for path,key in [('/predictions', 'predictions'),('/fixtures/lineups','lineups'),('/injuries','injuries'),('/fixtures/statistics','statistics'),('/fixtures/headtohead','h2h')]:
                 try:
                     if path=='/predictions': d2=self.http.get(path,{'fixture':fid})
@@ -283,7 +284,16 @@ class APIFootballProvider:
                         d2=self.http.get(path,{'h2h':f'{hi}-{ai}','last':10})
                     else: d2=self.http.get(path,{'fixture':fid})
                     out[key]=d2
-                except Exception as ex: out.setdefault('errors',[]).append(str(ex)[:160])
+                    if isinstance(d2,dict):
+                        response = d2.get('response')
+                        endpoint_diagnostics[key] = {
+                            'response_count': len(response) if isinstance(response,list) else (1 if isinstance(response,dict) else 0),
+                            'errors': d2.get('errors') or [],
+                        }
+                except Exception as ex:
+                    endpoint_diagnostics[key] = {'response_count':0,'errors':[str(ex)[:160]]}
+                    out.setdefault('errors',[]).append(str(ex)[:160])
+            out['endpoint_diagnostics'] = endpoint_diagnostics
 
             if league_id and season and home_id and away_id:
                 stats = {}
@@ -308,12 +318,17 @@ class APIFootballProvider:
             # team-season statistics are unavailable (common for some cups,
             # youth and national-team competitions).
             recent = {}
+            recent_diagnostics = {}
             for side, team_id in (('home', home_id), ('away', away_id)):
                 if not team_id:
                     continue
                 try:
                     dr = self.http.get('/fixtures', {'team': team_id, 'last': 5})
                     rows = dr.get('response', []) if isinstance(dr,dict) else []
+                    recent_diagnostics[side] = {
+                        'response_count': len(rows),
+                        'errors': dr.get('errors') or [] if isinstance(dr,dict) else [],
+                    }
                     gf=[]; ga=[]
                     for item in rows:
                         status = ((item.get('fixture') or {}).get('status') or {}).get('short')
@@ -341,6 +356,7 @@ class APIFootballProvider:
                     )
             if recent:
                 out['recent_team_form'] = recent
+            out['recent_form_diagnostics'] = recent_diagnostics
         except Exception as ex: out['errors']=[str(ex)[:300]]
         return out
 
