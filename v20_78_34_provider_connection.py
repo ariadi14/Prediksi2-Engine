@@ -18,7 +18,11 @@ class ProviderConnection:
         self.providers.append(FootballDataFixtureCSV(self.csv_path))
         self.providers.append(LocalFootballDatabase(self.database_path))
     @property
-    def configured(self): return bool(self.providers)
+    def configured(self):
+        # `configured` represents live-provider credential readiness.
+        # Historical CSV/SQLite providers remain available as fallbacks but
+        # must not make an otherwise unconfigured live connection appear ready.
+        return bool(self.api_key)
     def status(self):
         return {'configured':self.configured,'providers':[getattr(p,'name',p.__class__.__name__) for p in self.providers],
                 'live_provider':'api-football' if self.api_key else None,
