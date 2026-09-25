@@ -51,6 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      OPENFOOT_TOKEN: ${{ secrets.OPENFOOT_TOKEN }}
 
     steps:
       - name: Checkout repository
