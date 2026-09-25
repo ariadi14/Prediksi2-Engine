@@ -110,6 +110,19 @@ class APIFootballProvider:
                 if fallback_rows:
                     rows_all = fallback_rows
             cache[date] = rows_all
+            # Keep raw provider fixture rows so evidence enrichment can reuse
+            # the exact fixture already obtained during resolution.
+            raw_by_id = {}
+            for row in rows_all:
+                try:
+                    rid = (row.get('fixture') or {}).get('id')
+                    if rid is not None:
+                        raw_by_id[int(rid)] = row
+                except Exception:
+                    continue
+            if raw_by_id:
+                self._fixture_raw_by_id = getattr(self, '_fixture_raw_by_id', {})
+                self._fixture_raw_by_id.update(raw_by_id)
             self._last_fixture_error = None
             self._last_fixture_lookup = {
                 'date': date,
@@ -226,8 +239,12 @@ class APIFootballProvider:
             fid=fixture.get('fixture_id')
             candidates=[]
             if fid:
-                d=self.http.get('/fixtures',{'id':fid})
-                candidates=d.get('response',[]) if isinstance(d,dict) else []
+                cached = getattr(self, '_fixture_raw_by_id', {}).get(int(fid))
+                if cached:
+                    candidates=[cached]
+                else:
+                    d=self.http.get('/fixtures',{'id':fid})
+                    candidates=d.get('response',[]) if isinstance(d,dict) else []
             if not candidates:
                 params={'date':date} if date else ({'team':fixture.get('home_provider_ids',{}).get('api-football'),'next':50} if fixture.get('home_provider_ids',{}).get('api-football') else {'next':50})
                 d=self.http.get('/fixtures',params)
@@ -252,7 +269,10 @@ class APIFootballProvider:
             home_id = (best.get('teams') or {}).get('home',{}).get('id')
             away_id = (best.get('teams') or {}).get('away',{}).get('id')
 
-            for path,key in [('/predictions', 'predictions'),('/fixtures/lineups','lineups'),('/injuries','injuries'),('/fixtures/statistics','statistics'),('/fixtures/headtohead','h2h'),('/odds','odds')]:
+            # Evidence endpoints are limited to data useful for probability.
+            # Market odds remain locked to PelangiEuro and are never sourced
+            # from the provider. Cached fixture reuse removes one request.
+            for path,key in [('/predictions', 'predictions'),('/fixtures/lineups','lineups'),('/injuries','injuries'),('/fixtures/statistics','statistics'),('/fixtures/headtohead','h2h')]:
                 try:
                     if path=='/predictions': d2=self.http.get(path,{'fixture':fid})
                     elif path=='/fixtures/lineups': d2=self.http.get(path,{'fixture':fid})
