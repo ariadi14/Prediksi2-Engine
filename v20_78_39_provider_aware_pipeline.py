@@ -143,7 +143,44 @@ class ProviderAwarePipeline:
                     f['kickoff']=c.get('kickoff_wib') or c.get('kickoff_utc')
                     f['match_date']=c.get('date') or f.get('match_date')
                     return f,v
-        return f,{'status':'REJECTED','reason':'NO_VALID_PROVIDER_FIXTURE'}
+        # Quota-safe fallback: when API-Football explicitly reports its daily
+        # quota exhausted, the screenshot remains the source of fixture identity
+        # while the local DB supplies only historical evidence. We do not invent
+        # a provider fixture ID; the synthetic local ID is an internal key only.
+        quota_exhausted = any(
+            bool(getattr(p, '_last_fixture_lookup', {}).get('api_quota_exhausted'))
+            for p in self.providers
+        )
+        if quota_exhausted:
+            for p in self.providers:
+                if getattr(p, 'name', '') != 'football-local-db':
+                    continue
+                fetch = getattr(p, 'fetch', None)
+                if not fetch:
+                    continue
+                try:
+                    historical = fetch(dict(fixture)) or {}
+                except Exception:
+                    historical = {}
+                if historical.get('historical_db_source'):
+                    out = dict(fixture)
+                    out['fixture_id'] = (
+                        f"local:{fixture.get('match_date')}:{norm_name(fixture.get('home'))}:"
+                        f"{norm_name(fixture.get('away'))}"
+                    )
+                    out['home_canonical'] = fixture.get('home')
+                    out['away_canonical'] = fixture.get('away')
+                    out['kickoff'] = fixture.get('kickoff') or fixture.get('kickoff_wib')
+                    out['provider_competition'] = fixture.get('competition')
+                    out['local_historical_evidence_available'] = True
+                    return out, {
+                        'status': 'VALID',
+                        'match_mode': 'SCREENSHOT_IDENTITY_LOCAL_HISTORY',
+                        'provider': 'football-local-db',
+                        'reason': 'API_FOOTBALL_DAILY_QUOTA_EXHAUSTED',
+                    }
+
+                return f,{'status':'REJECTED','reason':'NO_VALID_PROVIDER_FIXTURE'}
 
     def run_fixture(self, fixture: Dict[str,Any]):
         f, validation=self.resolve_fixture(fixture)
