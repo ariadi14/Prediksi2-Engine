@@ -145,7 +145,7 @@ class OpenFootProvider:
                     'away_name':a.get('name'),
                     'date':kickoff[:10] or date,
                     'kickoff_utc':kickoff,
-                    'competition':m.get('competitionName') or m.get('competitionId'),
+                    'competition':m.get('competitionName'),
                     'home_id':h.get('id'),
                     'away_id':a.get('id'),
                     'match_mode':'STRONG_BOTH',
