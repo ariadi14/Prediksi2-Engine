@@ -5,7 +5,8 @@ def test_national_fixture_uses_broad_provider():
     r = route_provider("World Cup Qualifiers", home="Brazil", away="Colombia")
     assert r.fixture_type == "NATIONAL_VS_NATIONAL"
     assert r.primary == "api-football"
-    assert "openfoot" not in [r.primary, *r.fallback]\n    assert "sportmonks" not in [r.primary, *r.fallback]
+    assert "openfoot" not in [r.primary, *r.fallback]
+    assert "sportmonks" not in [r.primary, *r.fallback]
 
 
 def test_csv_is_fallback_when_api_football_unavailable():
