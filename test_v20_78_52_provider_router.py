@@ -32,5 +32,5 @@ def test_api_football_is_first_and_csv_is_fallback():
     os.environ["API_FOOTBALL_KEY"]="test-key"
     os.environ["FOOTBALL_DATA_CSV_PATH"]="/tmp/nonexistent-prediksi2.csv"
     conn=ProviderConnection()
-    assert [p.name for p in conn.providers] == ["api-football", "football-data-csv"]
+    assert [p.name for p in conn.providers] == ["api-football", "football-data-csv", "football-local-db"]
     assert all(p.name != "openfoot" for p in conn.providers)
