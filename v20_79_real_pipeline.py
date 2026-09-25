@@ -279,10 +279,28 @@ def main() -> int:
         )
         prediction = pipeline.prob.run(fixture_key, {"status": "ENRICHED", "payload": ev_payload}, visible)
         if prediction.get("status") != "CALCULATED":
+            # Preserve the exact provider evidence coverage that caused the
+            # probability gate to stop. This is diagnostic only: it does not
+            # relax thresholds and does not invent missing values.
+            missing_expected_goals = [
+                side for side, value in (
+                    ("home", prediction.get("home_xg")),
+                    ("away", prediction.get("away_xg")),
+                ) if value is None
+            ]
             unresolved.append({
                 "fixture": resolved,
                 "reason": "PROBABILITY_INSUFFICIENT",
                 "prediction": prediction,
+                "probability_diagnostics": {
+                    "missing_expected_goals_sides": missing_expected_goals,
+                    "evidence_keys": sorted(ev_payload.keys()),
+                    "evidence_sources": ev_payload.get("evidence_sources", []),
+                    "evidence_conflicts": ev_payload.get("evidence_conflicts", []),
+                    "provider_collector_errors": ev_payload.get("collector_errors", []),
+                    "visible_market_count": len(visible),
+                    "visible_markets": visible,
+                },
             })
             continue
         probability_calculated += 1
