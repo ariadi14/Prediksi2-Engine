@@ -360,6 +360,15 @@ def flatten_provider_payload(raw:Dict[str,Any])->Dict[str,Any]:
     pred=(raw.get('predictions') or {}).get('response',[]) if isinstance(raw.get('predictions'),dict) else []
     if pred:
         p=pred[0]
+        goals=p.get('goals') or {}
+        if isinstance(goals,dict):
+            for side in ('home','away'):
+                value=goals.get(side)
+                try:
+                    if value is not None:
+                        out[f'{side}_predicted_goals']=float(value)
+                except (TypeError,ValueError):
+                    pass
         pct=p.get('percent') or {}
         if pct.get('home') is not None:
             try: out['ml_home_prob']=float(pct['home'])/100
