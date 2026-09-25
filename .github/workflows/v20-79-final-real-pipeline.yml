@@ -181,6 +181,21 @@ jobs:
           print("Counts:", data["counts"])
           print("5-leg candidates:", len(data["candidate_parlay_5"]))
           print("7-leg candidates:", len(data["candidate_parlay_7"]))
+          print()
+          print("PROBABILITY REPAIR DIAGNOSTICS:")
+          for item in data.get("unresolved", []):
+              if item.get("reason") == "PROBABILITY_INSUFFICIENT":
+                  fixture = item.get("fixture", {})
+                  diag = item.get("probability_diagnostics", {})
+                  print({
+                      "fixture": f'{fixture.get("home_canonical") or fixture.get("home")} vs {fixture.get("away_canonical") or fixture.get("away")}',
+                      "kickoff": fixture.get("kickoff"),
+                      "missing_expected_goals_sides": diag.get("missing_expected_goals_sides"),
+                      "evidence_keys": diag.get("evidence_keys"),
+                      "evidence_sources": diag.get("evidence_sources"),
+                      "provider_collector_errors": diag.get("provider_collector_errors"),
+                      "visible_market_count": diag.get("visible_market_count"),
+                  })
           PY
 
       - name: Publish final artifact
