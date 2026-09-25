@@ -86,7 +86,8 @@ jobs:
           echo "API-FOOTBALL SECRET: PRESENT"
           echo "OPENFOOT: DISABLED IN V20.79"
           echo "CSV FALLBACK PATH: ${FOOTBALL_DATA_CSV_PATH}"
-\n      - name: Validate batch screenshot input
+
+      - name: Validate batch screenshot input
         env:
           SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
         run: |
