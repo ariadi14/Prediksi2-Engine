@@ -7,7 +7,7 @@ for visible market/line/odds; provider data is used only for fixture/evidence.
 """
 from __future__ import annotations
 
-import argparse, json, math
+import argparse, json, math, os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -166,6 +166,8 @@ def main() -> int:
     ap.add_argument("--min-probability", type=float, default=0.55)
     ap.add_argument("--min-ev", type=float, default=0.02)
     ap.add_argument("--max-evidence-fixtures", type=int, default=0, help="Safety cap for live evidence calls. 0 means unlimited.")
+    ap.add_argument("--api-throttle-seconds", type=float, default=None,
+                    help="Minimum delay between API-Football requests. Overrides API_FOOTBALL_THROTTLE_SECONDS.")
     ap.add_argument("--output", default="artifacts/v20_79_final_output.json")
     args = ap.parse_args()
 
@@ -179,6 +181,14 @@ def main() -> int:
         raise SystemExit(f"INVALID_TIME_WINDOW: {args.time_window}")
 
     fixture_search_date = resolve_fixture_search_date(args.fixture_date)
+
+    # Configure provider throttling before ProviderAwarePipeline creates its
+    # API-Football HTTP adapter. This keeps the quota-safe live-evidence
+    # experiment explicit and reproducible.
+    if args.api_throttle_seconds is not None:
+        if args.api_throttle_seconds < 0:
+            raise SystemExit("INVALID_API_THROTTLE_SECONDS: must be >= 0")
+        os.environ["API_FOOTBALL_THROTTLE_SECONDS"] = str(args.api_throttle_seconds)
 
     parser = FastPelangiParser()
     fixtures = []
@@ -375,6 +385,7 @@ def main() -> int:
         "time_filter_mode": "MANUAL",
         "market_source_locked": True,
         "no_forced_quota": True,
+        "api_throttle_seconds": args.api_throttle_seconds,
         "thresholds": {
             "minimum_probability": args.min_probability,
             "minimum_ev": args.min_ev,

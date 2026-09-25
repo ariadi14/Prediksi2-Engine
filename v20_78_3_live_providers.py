@@ -145,9 +145,9 @@ class APIFootballProvider:
                 'rows': len(rows_all),
                 'pages': page,
                 'error': None,
-                'api_errors': response_errors[:10],
+                'api_errors': list(response_errors)[:10] if isinstance(response_errors, list) else [str(response_errors)[:300]],
                 'fallback_without_timezone_rows': len(fallback_rows),
-                'fallback_without_timezone_errors': fallback_errors[:10],
+                'fallback_without_timezone_errors': list(fallback_errors)[:10] if isinstance(fallback_errors, list) else [str(fallback_errors)[:300]],
             }
             return rows_all
         except Exception as ex:
@@ -158,6 +158,7 @@ class APIFootballProvider:
                 'rows': len(rows_all),
                 'pages': page,
                 'error': self._last_fixture_error,
+                'exception_type': type(ex).__name__,
             }
             return rows_all
 
