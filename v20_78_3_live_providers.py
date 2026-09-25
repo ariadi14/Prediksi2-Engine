@@ -14,6 +14,7 @@ class JSONHTTP:
         self.throttle_seconds = float(os.getenv("API_FOOTBALL_THROTTLE_SECONDS", "0")) if "api-sports.io" in self.base_url else 0.0
         self._last_request_at = 0.0
         self.rate_limit_diagnostics = {}
+        self.api_quota_exhausted = False
     def get(self, path:str, params:Optional[Dict[str,Any]]=None):
         url=self.base_url+path
         if params:
@@ -34,7 +35,21 @@ class JSONHTTP:
                     lk=k.lower()
                     if lk in {"x-ratelimit-requests-limit","x-ratelimit-requests-remaining","x-ratelimit-limit","x-ratelimit-remaining"}:
                         self.rate_limit_diagnostics[lk] = v
-                return json.loads(r.read().decode("utf-8"))
+                payload = json.loads(r.read().decode("utf-8"))
+                errors = payload.get("errors") if isinstance(payload, dict) else None
+                error_text = json.dumps(errors, ensure_ascii=False).lower() if errors else ""
+                quota_markers = (
+                    "request limit for the day",
+                    "daily request limit",
+                    "rate limit exceeded",
+                    "too many requests",
+                    "quota exceeded",
+                )
+                if any(marker in error_text for marker in quota_markers):
+                    self.api_quota_exhausted = True
+                    self.rate_limit_diagnostics["quota_exhausted"] = True
+                    self.rate_limit_diagnostics["quota_error"] = str(errors)[:500]
+                return payload
         except Exception as exc:
             self._last_request_at = time.monotonic()
             raise exc
@@ -140,6 +155,13 @@ class APIFootballProvider:
                 self._fixture_raw_by_id = getattr(self, '_fixture_raw_by_id', {})
                 self._fixture_raw_by_id.update(raw_by_id)
             self._last_fixture_error = None
+            quota_exhausted = bool(getattr(self.http, 'api_quota_exhausted', False))
+            if quota_exhausted:
+                # A daily quota response is terminal for this run. Do not make
+                # the conservative timezone-less fallback request, which would
+                # consume another API call without changing the outcome.
+                fallback_rows = []
+                fallback_errors = []
             self._last_fixture_lookup = {
                 'date': date,
                 'rows': len(rows_all),
@@ -148,6 +170,9 @@ class APIFootballProvider:
                 'api_errors': list(response_errors)[:10] if isinstance(response_errors, list) else [str(response_errors)[:300]],
                 'fallback_without_timezone_rows': len(fallback_rows),
                 'fallback_without_timezone_errors': list(fallback_errors)[:10] if isinstance(fallback_errors, list) else [str(fallback_errors)[:300]],
+                'api_quota_exhausted': quota_exhausted,
+                'throttle_seconds': getattr(self.http, 'throttle_seconds', 0.0),
+                'rate_limit_diagnostics': dict(getattr(self.http, 'rate_limit_diagnostics', {})),
             }
             return rows_all
         except Exception as ex:
