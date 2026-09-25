@@ -165,6 +165,7 @@ def main() -> int:
     ap.add_argument("--fixture-date", default="AUTO", help="Provider fixture search date: AUTO or YYYY-MM-DD")
     ap.add_argument("--min-probability", type=float, default=0.55)
     ap.add_argument("--min-ev", type=float, default=0.02)
+    ap.add_argument("--max-evidence-fixtures", type=int, default=0, help="Safety cap for live evidence calls. 0 means unlimited.")
     ap.add_argument("--output", default="artifacts/v20_79_final_output.json")
     args = ap.parse_args()
 
@@ -210,6 +211,7 @@ def main() -> int:
     time_window_matches = 0
     evidence_enriched = 0
     probability_calculated = 0
+    evidence_attempts = 0
 
     for fixture in fixtures:
         if not fixture.get("home") or not fixture.get("away"):
@@ -251,6 +253,15 @@ def main() -> int:
             continue
         time_window_matches += 1
 
+        if args.max_evidence_fixtures > 0 and evidence_attempts >= args.max_evidence_fixtures:
+            unresolved.append({
+                "fixture": resolved,
+                "reason": "EVIDENCE_TEST_LIMIT_REACHED",
+                "limit": args.max_evidence_fixtures,
+            })
+            continue
+
+        evidence_attempts += 1
         provider_evidence = pipeline.ev.fetch(resolved)
         if provider_evidence.get("status") != "ENRICHED":
             unresolved.append({
