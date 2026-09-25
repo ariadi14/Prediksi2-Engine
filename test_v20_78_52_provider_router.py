@@ -5,17 +5,13 @@ def test_national_fixture_uses_broad_provider():
     r = route_provider("World Cup Qualifiers", home="Brazil", away="Colombia")
     assert r.fixture_type == "NATIONAL_VS_NATIONAL"
     assert r.primary == "api-football"
-    assert "sportmonks" not in [r.primary, *r.fallback]
+    assert "openfoot" not in [r.primary, *r.fallback]\n    assert "sportmonks" not in [r.primary, *r.fallback]
 
 
-def test_sportmonks_only_approved_competitions():
-    r = route_provider("Danish Superliga", home="Team A", away="Team B")
-    assert r.primary == "sportmonks"
-
-
-def test_scottish_premiership_is_allowed():
-    r = route_provider("Scottish Premiership", home="Team A", away="Team B")
-    assert r.primary == "sportmonks"
+def test_csv_is_fallback_when_api_football_unavailable():
+    r = route_provider("Danish Superliga", home="Team A", away="Team B", api_football_available=False)
+    assert r.primary == "football-data-csv"
+    assert r.fallback == []
 
 
 def test_other_club_competition_uses_api_football_first():
