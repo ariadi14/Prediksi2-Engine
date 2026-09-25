@@ -83,3 +83,19 @@ def test_probability_uses_recent_real_fixture_rates_as_second_fallback():
     }
     assert expected_goals(evidence, "home") == 1.5
     assert expected_goals(evidence, "away") == 0.9
+
+def test_parser_market_columns_scale_with_screenshot_width():
+    from fast_pelangi_parser import FastPelangiParser
+    cols = FastPelangiParser._columns(720)
+    assert cols["one"] == (415.0, 505.0)
+    assert cols["ou"] == (505.0, 610.0)
+    assert cols["hdp"] == (610.0, 690.0)
+
+    wide = FastPelangiParser._columns(1080)
+    assert wide["one"][0] == 622.5
+    assert wide["one"][1] == 757.5
+    assert wide["ou"][0] == 757.5
+    assert wide["ou"][1] == 915.0
+    assert wide["hdp"][0] == 915.0
+    assert wide["hdp"][1] == 1035.0
+\n
