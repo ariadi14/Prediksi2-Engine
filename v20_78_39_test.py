@@ -37,7 +37,12 @@ class FixtureOnlyProvider(MockProvider):
         }
 
 
-def test_real_connection_explicitly_unconfigured():
+def test_real_connection_explicitly_unconfigured(monkeypatch):
+    # The final workflow intentionally provides API_FOOTBALL_KEY for real
+    # fixture/evidence resolution. This unit test must isolate credentials so
+    # it verifies the unconfigured state independently of the CI environment.
+    monkeypatch.delenv('API_FOOTBALL_KEY', raising=False)
+    monkeypatch.delenv('OPENFOOT_TOKEN', raising=False)
     assert ProviderConnection().configured is False
 
 
