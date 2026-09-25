@@ -52,6 +52,7 @@ jobs:
     env:
       API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
       FOOTBALL_DATA_CSV_PATH: data/football_data.csv
+      FOOTBALL_DATABASE_PATH: data/database/football.db
 
     steps:
       - name: Checkout repository
@@ -129,7 +130,7 @@ jobs:
       - name: Run regression tests
         run: |
           set -euo pipefail
-          pytest -q test_v20_79_real_pipeline.py v20_78_39_test.py
+          pytest -q test_v20_79_real_pipeline.py v20_78_39_test.py test_v20_79_local_database.py
           echo "V20.79 + EVIDENCE GATE REGRESSION TESTS: PASS"
 
       - name: Run FINAL REAL pipeline
