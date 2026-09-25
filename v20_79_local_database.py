@@ -100,7 +100,13 @@ def openfootball_txt_records(text: str, source: str, path: str) -> Iterable[dict
         if md:
             y = int(md.group(3)) if md.group(3) else year
             if y:
-                current_date = datetime.strptime(f"{md.group(1)} {md.group(2)} {y}", "%b %d %Y").date().isoformat()
+                try:
+                    current_date = datetime.strptime(
+                        f"{md.group(1)} {md.group(2)} {y}", "%b %d %Y"
+                    ).date().isoformat()
+                except ValueError:
+                    # Ignore malformed/non-calendar dates in public source files.
+                    current_date = ""
             continue
         mm = match_re.match(line)
         if not mm or not current_date:
