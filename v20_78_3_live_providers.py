@@ -131,7 +131,7 @@ class APIFootballProvider:
             # a timezone/query issue from a genuinely empty provider day.
             fallback_rows = []
             fallback_errors = []
-            if not rows_all:
+            if not rows_all and not getattr(self.http, 'api_quota_exhausted', False):
                 try:
                     d2 = self.http.get('/fixtures', {'date': date})
                     fallback_rows = d2.get('response', []) if isinstance(d2, dict) else []
