@@ -183,6 +183,12 @@ class ProviderAwarePipeline:
 
                 return f,{'status':'REJECTED','reason':'NO_VALID_PROVIDER_FIXTURE'}
 
+        # Always return a deterministic rejected result when no provider path
+        # can resolve the fixture. The previous implementation could fall
+        # through without returning a tuple, causing callers that unpack
+        # resolve_fixture() to crash with "cannot unpack non-iterable NoneType".
+        return f, {'status': 'REJECTED', 'reason': 'NO_VALID_PROVIDER_FIXTURE'}
+
     def run_fixture(self, fixture: Dict[str,Any]):
         f, validation=self.resolve_fixture(fixture)
         if validation.get('status')!='VALID':
