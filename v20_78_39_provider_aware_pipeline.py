@@ -113,49 +113,58 @@ class ProviderAwarePipeline:
         # First try the provider's daily fixture index using the screenshot
         # names directly. This avoids expensive per-team /teams calls and
         # still requires a real provider fixture before acceptance.
-        for p in self.providers:
-            fn=getattr(p,'find_fixture',None)
-            if not fn: continue
-            try: candidates=fn(dict(fixture)) or []
-            except Exception: candidates=[]
-            for c in candidates:
-                v=validate_fixture(fixture,c,min_team=82,min_comp=40)
-                if v.get('status')=='VALID':
-                    out=dict(fixture)
-                    out['fixture_id']=c.get('fixture_id')
-                    out['home_canonical']=c.get('home_name')
-                    out['away_canonical']=c.get('away_name')
-                    out['home_provider_ids']={'api-football': c.get('home_id')} if c.get('home_id') else out.get('home_provider_ids',{})
-                    out['away_provider_ids']={'api-football': c.get('away_id')} if c.get('away_id') else out.get('away_provider_ids',{})
-                    out['provider_competition']=c.get('competition')
-                    out['kickoff_utc']=c.get('kickoff_utc')
-                    out['kickoff_wib']=c.get('kickoff_wib')
-                    # The exact provider kickoff is authoritative for the
-                    # manual WIB time filter after fixture resolution.
-                    out['kickoff']=c.get('kickoff_wib') or c.get('kickoff_utc')
-                    out['match_date']=c.get('date') or out.get('match_date')
-                    return out,v
+        for probe_date in self._fixture_date_candidates(fixture):
+            probe = dict(fixture)
+            if probe_date:
+                probe['match_date'] = probe_date
+            for p in self.providers:
+                fn=getattr(p,'find_fixture',None)
+                if not fn: continue
+                try: candidates=fn(dict(probe)) or []
+                except Exception: candidates=[]
+                for c in candidates:
+                    v=validate_fixture(probe,c,min_team=82,min_comp=40)
+                    if v.get('status')=='VALID':
+                        out=dict(probe)
+                        out['fixture_id']=c.get('fixture_id')
+                        out['home_canonical']=c.get('home_name')
+                        out['away_canonical']=c.get('away_name')
+                        out['home_provider_ids']={'api-football': c.get('home_id')} if c.get('home_id') else out.get('home_provider_ids',{})
+                        out['away_provider_ids']={'api-football': c.get('away_id')} if c.get('away_id') else out.get('away_provider_ids',{})
+                        out['provider_competition']=c.get('competition')
+                        out['kickoff_utc']=c.get('kickoff_utc')
+                        out['kickoff_wib']=c.get('kickoff_wib')
+                        out['kickoff']=c.get('kickoff_wib') or c.get('kickoff_utc')
+                        out['match_date']=c.get('date') or out.get('match_date')
+                        out['fixture_date_resolution_mode']='INFERRED_NEARBY_DATE' if probe_date != str(fixture.get('match_date')) else 'EXACT_DATE'
+                        return out,v
 
         # If direct fixture matching fails, use the slower identity resolver
         # as a second path. Unknown remains unresolved.
         f=self.resolve_identity(fixture)
-        for p in self.providers:
-            fn=getattr(p,'find_fixture',None)
-            if not fn: continue
-            try: candidates=fn(f) or []
-            except Exception: candidates=[]
-            for c in candidates:
-                v=validate_fixture(f,c,min_team=82,min_comp=40)
-                if v.get('status')=='VALID':
-                    f['fixture_id']=c.get('fixture_id')
-                    f['home_canonical']=c.get('home_name') or f.get('home_canonical')
-                    f['away_canonical']=c.get('away_name') or f.get('away_canonical')
-                    f['provider_competition']=c.get('competition')
-                    f['kickoff_utc']=c.get('kickoff_utc')
-                    f['kickoff_wib']=c.get('kickoff_wib')
-                    f['kickoff']=c.get('kickoff_wib') or c.get('kickoff_utc')
-                    f['match_date']=c.get('date') or f.get('match_date')
-                    return f,v
+        for probe_date in self._fixture_date_candidates(f):
+            probe = dict(f)
+            if probe_date:
+                probe['match_date'] = probe_date
+            for p in self.providers:
+                fn=getattr(p,'find_fixture',None)
+                if not fn: continue
+                try: candidates=fn(probe) or []
+                except Exception: candidates=[]
+                for c in candidates:
+                    v=validate_fixture(probe,c,min_team=82,min_comp=40)
+                    if v.get('status')=='VALID':
+                        probe['fixture_id']=c.get('fixture_id')
+                        probe['home_canonical']=c.get('home_name') or probe.get('home_canonical')
+                        probe['away_canonical']=c.get('away_name') or probe.get('away_canonical')
+                        probe['provider_competition']=c.get('competition')
+                        probe['kickoff_utc']=c.get('kickoff_utc')
+                        probe['kickoff_wib']=c.get('kickoff_wib')
+                        probe['kickoff']=c.get('kickoff_wib') or c.get('kickoff_utc')
+                        probe['match_date']=c.get('date') or probe.get('match_date')
+                        probe['fixture_date_resolution_mode']='INFERRED_NEARBY_DATE' if probe_date != str(f.get('match_date')) else 'EXACT_DATE'
+                        return probe,v
+
         # Quota-safe fallback: when API-Football explicitly reports its daily
         # quota exhausted, the screenshot remains the source of fixture identity
         # while the local DB supplies only historical evidence. We do not invent
