@@ -28,3 +28,33 @@ def test_ensemble_preserves_baseline_when_no_external_output():
     r=ensemble_1x2({"Home":.5,"Draw":.25,"Away":.25},{},{})
     assert r["status"]=="BASELINE_ONLY"
     assert r["probabilities"]["Home"]==.5
+
+
+def test_api_football_fixture_snapshot_is_used_without_api_call(tmp_path, monkeypatch):
+    import json
+    from v20_78_3_live_providers import APIFootballProvider
+
+    snapshot = tmp_path / "fixtures.json"
+    snapshot.write_text(json.dumps({
+        "fixtures_by_date": {
+            "2026-09-27": [{
+                "fixture": {"id": 123456},
+                "teams": {
+                    "home": {"id": 1, "name": "Denmark"},
+                    "away": {"id": 2, "name": "Wales"},
+                },
+                "league": {"name": "UEFA Nations League A"},
+                "fixture": {"id": 123456, "date": "2026-09-27T18:00:00+00:00"}
+            }]
+        }
+    }), encoding="utf-8")
+    monkeypatch.setenv("API_FOOTBALL_FIXTURE_SNAPSHOT_PATH", str(snapshot))
+    provider = APIFootballProvider("test-key")
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("snapshot test must not call API-Football")
+
+    provider.http.get = fail_get
+    rows = provider._fixtures_for_date("2026-09-27")
+    assert len(rows) == 1
+    assert provider._last_fixture_lookup["source"] == "PROVIDER_SNAPSHOT"
