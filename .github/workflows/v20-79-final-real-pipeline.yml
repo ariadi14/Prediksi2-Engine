@@ -240,6 +240,17 @@ jobs:
           print()
           print("Input screenshots:", len(data["screenshots"]))
           print("Counts:", data["counts"])
+          diagnostic = data.get("engine_diagnostic", {})
+          print()
+          print("=== ENGINE HEALTH ===")
+          print("Engine status:", diagnostic.get("engine_status"))
+          print("Execution healthy:", diagnostic.get("execution_healthy"))
+          print("Qualification status:", diagnostic.get("qualification_status"))
+          print("Reason codes:", diagnostic.get("reason_codes"))
+          if diagnostic.get("engine_status") == "HEALTHY_NO_QUALIFIED_MARKETS":
+              print("INFO: ENGINE SEHAT — 0 qualified karena tidak ada market yang memenuhi threshold.")
+          elif diagnostic.get("engine_status") == "PIPELINE_REQUIRES_DIAGNOSTIC":
+              print("WARNING: PIPELINE MEMERLUKAN DIAGNOSTIC — jangan menganggap 0 qualified sebagai masalah threshold.")
           print("5-leg candidates:", len(data["candidate_parlay_5"]))
           print("7-leg candidates:", len(data["candidate_parlay_7"]))
           print()
