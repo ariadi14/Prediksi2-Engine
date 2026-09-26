@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       screenshot_paths:
-        description: "Isi hanya nama/path file screenshot, pisahkan dengan koma. Contoh: Screenshot_20260924-213851.jpg,Screenshot_20260924-213856.jpg"
+        description: "Masukkan nama/path screenshot yang sudah ada di repository, pisahkan dengan koma. Contoh: screenshots/FILE1.jpg,screenshots/FILE2.jpg"
         required: true
         type: string
       fixture_date:
