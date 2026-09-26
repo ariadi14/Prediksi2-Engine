@@ -123,6 +123,10 @@ class ProviderAwarePipeline:
                 try: candidates=fn(dict(probe)) or []
                 except Exception: candidates=[]
                 for c in candidates:
+                    home_c=norm_name(c.get('home_name'))
+                    away_c=norm_name(c.get('away_name'))
+                    if home_c and away_c and home_c==away_c:
+                        continue
                     v=validate_fixture(probe,c,min_team=82,min_comp=40)
                     if v.get('status')=='VALID':
                         out=dict(probe)
@@ -152,6 +156,10 @@ class ProviderAwarePipeline:
                 try: candidates=fn(probe) or []
                 except Exception: candidates=[]
                 for c in candidates:
+                    home_c=norm_name(c.get('home_name'))
+                    away_c=norm_name(c.get('away_name'))
+                    if home_c and away_c and home_c==away_c:
+                        continue
                     v=validate_fixture(probe,c,min_team=82,min_comp=40)
                     if v.get('status')=='VALID':
                         probe['fixture_id']=c.get('fixture_id')
