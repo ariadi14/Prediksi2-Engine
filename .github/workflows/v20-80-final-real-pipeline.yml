@@ -123,7 +123,10 @@ jobs:
           import v20_78_35_fixture_validation
           import v20_78_39_provider_aware_pipeline
           import v20_79_real_pipeline
-          print("V20.79 CORE IMPORT: PASS")
+          import v20_80_data_preparation
+          import v20_80_model_audit
+          import v20_80_real_pipeline
+          print("V20.79 BASELINE + V20.80 CORE IMPORT: PASS")
           PY
 
       - name: Run regression tests
@@ -168,10 +171,10 @@ jobs:
           import json
           from pathlib import Path
 
-          p = Path("artifacts/v20_79_final_output.json")
+          p = Path("artifacts/v20_80_final_output.json")
           data = json.loads(p.read_text(encoding="utf-8"))
 
-          assert data["engine_version"] == "V20.79"
+          assert data["engine_version"] == "V20.80"
           assert data["source"] == "PelangiEuro"
           assert data["time_filter_mode"] == "MANUAL"
           assert data["market_source_locked"] is True
@@ -256,15 +259,15 @@ jobs:
       - name: Publish final artifact
         uses: actions/upload-artifact@v4
         with:
-          name: v20-79-final-real-pipeline
-          path: artifacts/v20_79_final_output.json
+          name: v20-80-final-real-pipeline
+          path: artifacts/v20_80_final_output.json
 
       - name: FINAL status
         run: |
           set -euo pipefail
           echo
           echo "======================================================"
-          echo " V20.79 FINAL REAL PIPELINE: PASS"
+          echo " V20.80 DATA PREPARATION + EXTERNAL AUDIT: PASS"
           echo "======================================================"
           echo
           echo "V20.80"
