@@ -33,9 +33,9 @@ on:
         default: "0.02"
         type: string
       max_evidence_fixtures:
-        description: "Safety cap evidence live: 1 untuk uji hemat kuota; 0 = unlimited"
+        description: "Batas evidence live: 0 = semua fixture dalam window; angka positif = batas uji"
         required: true
-        default: "1"
+        default: "0"
         type: string
       api_throttle_seconds:
         description: "Jeda antar request API-Football; 6.2 aman untuk batas 10 request/menit"
@@ -208,6 +208,35 @@ jobs:
               assert item.get("reason")
 
           print("FINAL OUTPUT SAFETY: PASS")
+          print()
+          print("=== HASIL PER FIXTURE ===")
+          for item in data.get("fixtures", []):
+              f = item.get("fixture", {})
+              best = item.get("best_prediction")
+              name = f'{f.get("home_canonical") or f.get("home")} vs {f.get("away_canonical") or f.get("away")}'
+              if best:
+                  sig = best.get("signal", {})
+                  print({
+                      "fixture": name,
+                      "kickoff": f.get("kickoff"),
+                      "prediction": f'{best.get("market")} {best.get("selection")}',
+                      "probability": best.get("model_probability"),
+                      "ev": best.get("ev"),
+                      "signal": sig.get("label"),
+                      "recommendation": best.get("recommendation_note"),
+                      "historical": item.get("historical_data_status"),
+                  })
+              else:
+                  print({
+                      "fixture": name,
+                      "kickoff": f.get("kickoff"),
+                      "prediction": None,
+                      "probability": None,
+                      "ev": None,
+                      "signal": "DATA TIDAK CUKUP",
+                      "recommendation": item.get("result_note", "HASIL TIDAK DIKETAHUI KARENA DATA TIDAK ADA"),
+                      "historical": item.get("historical_data_status"),
+                  })
           print()
           print("Input screenshots:", len(data["screenshots"]))
           print("Counts:", data["counts"])
