@@ -143,8 +143,21 @@ class ProviderAwarePipeline:
                         out['fixture_date_resolution_mode']='INFERRED_NEARBY_DATE' if probe_date != str(fixture.get('match_date')) else 'EXACT_DATE'
                         return out,v
 
-        # If direct fixture matching fails, use the slower identity resolver
-        # as a second path. Unknown remains unresolved.
+        # For inferred screenshot dates, the daily fixture index is the
+        # authoritative provider lookup. Do not fall back to per-team
+        # /teams/search calls: those multiply API requests across dozens of
+        # OCR rows and can exhaust the daily quota without adding fixture
+        # evidence. OCR-noisy names are already matched against the full
+        # provider fixture index using fuzzy team-name scoring.
+        if fixture.get('match_date_inferred'):
+            return dict(fixture), {
+                'status': 'REJECTED',
+                'reason': 'NO_VALID_PROVIDER_FIXTURE',
+                'resolution_mode': 'DAILY_INDEX_ONLY_FOR_INFERRED_DATE',
+            }
+
+        # For explicit/readable dates, retain the slower identity resolver as
+        # a second provider-backed path.
         f=self.resolve_identity(fixture)
         for probe_date in self._fixture_date_candidates(f):
             probe = dict(f)
