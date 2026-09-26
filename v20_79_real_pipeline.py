@@ -287,18 +287,49 @@ def main() -> int:
 
         evidence_attempts += 1
         provider_evidence = pipeline.ev.fetch(resolved)
+        ev_payload = dict(provider_evidence.get("payload") or {})
+
+        # Historical availability is reported explicitly. Missing historical
+        # data must never make an otherwise resolved fixture disappear.
+        historical_keys = (
+            "home_goals_for_home_avg", "home_goals_against_home_avg",
+            "away_goals_for_away_avg", "away_goals_against_away_avg",
+            "home_recent_goals_for_avg", "home_recent_goals_against_avg",
+            "away_recent_goals_for_avg", "away_recent_goals_against_avg",
+        )
+        historical_available = all(ev_payload.get(k) is not None for k in historical_keys)
+        historical_partial = any(ev_payload.get(k) is not None for k in historical_keys)
+
         if provider_evidence.get("status") != "ENRICHED":
+            results.append({
+                "fixture": resolved,
+                "validation": validation,
+                "evidence_status": provider_evidence.get("status"),
+                "prediction_status": "NOT_CALCULATED",
+                "historical_data_available": historical_available,
+                "historical_data_status": "NOT_AVAILABLE" if not historical_partial else "PARTIAL",
+                "model": {
+                    "home_xg": None,
+                    "away_xg": None,
+                    "calibration": None,
+                    "warnings": ["HISTORICAL_DATA_NOT_AVAILABLE"],
+                },
+                "markets": [],
+                "best_prediction": None,
+                "result_note": "HASIL TIDAK DIKETAHUI KARENA DATA TIDAK ADA",
+            })
             unresolved.append({
                 "fixture": resolved,
                 "reason": provider_evidence.get("reason", "EVIDENCE_UNAVAILABLE"),
                 "validation": validation,
                 "provider_evidence_diagnostics": provider_evidence.get("providers", []),
+                "historical_data_available": historical_available,
+                "historical_data_status": "NOT_AVAILABLE" if not historical_partial else "PARTIAL",
             })
             continue
         evidence_enriched += 1
 
         visible = resolved.get("markets") or []
-        ev_payload = dict(provider_evidence.get("payload") or {})
         ev_payload["ou_lines"] = sorted({
             float(x["line"]) for x in visible
             if str(x.get("market")).upper() == "O/U" and x.get("line") is not None
@@ -397,6 +428,20 @@ def main() -> int:
             else:
                 recommendation = "PROBABILITAS DAN EV MEMENUHI BATAS YANG DITETAPKAN"
 
+            # Signal is attached only to the single best prediction for this
+            # fixture. Other visible markets remain analysis-only.
+            if prob >= args.min_probability and ev is not None and ev >= args.min_ev:
+                signal_color, signal_label = "GREEN", "HIJAU"
+            elif prob >= args.min_probability or (ev is not None and ev >= args.min_ev):
+                signal_color, signal_label = "YELLOW", "KUNING"
+            else:
+                signal_color, signal_label = "RED", "MERAH"
+
+            best_prediction["signal"] = {
+                "color": signal_color,
+                "label": signal_label,
+                "basis": "BEST_VISIBLE_MARKET_PROBABILITY_AND_EV",
+            }
             best_prediction["recommendation_note"] = recommendation
             best_prediction["warnings_for_user"] = notes
             best_prediction["decision_owner"] = "USER"
@@ -412,6 +457,8 @@ def main() -> int:
             "validation": validation,
             "evidence_status": provider_evidence.get("status"),
             "prediction_status": prediction.get("status"),
+            "historical_data_available": historical_available,
+            "historical_data_status": "AVAILABLE" if historical_available else ("PARTIAL" if historical_partial else "NOT_AVAILABLE"),
             "model": {
                 "home_xg": prediction.get("home_xg"),
                 "away_xg": prediction.get("away_xg"),
@@ -464,6 +511,8 @@ def main() -> int:
             "resolved_fixtures": len(results),
             "unresolved_fixtures": len(unresolved),
             "qualified_markets": len(candidates),
+            "fixtures_with_best_prediction": sum(1 for r in results if r.get("best_prediction")),
+            "fixtures_without_historical_data": sum(1 for r in results if r.get("historical_data_available") is False),
         },
         "fixtures": results,
         "unresolved": unresolved,
