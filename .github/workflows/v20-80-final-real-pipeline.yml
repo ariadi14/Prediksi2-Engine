@@ -1,0 +1,290 @@
+name: V20.80 - DATA PREPARATION + EXTERNAL AUDIT
+
+on:
+  workflow_dispatch:
+    inputs:
+      screenshot_paths:
+        description: "Path screenshot PelangiEuro di repository, pisahkan dengan koma. Default memakai 6 screenshot live yang sudah tersimpan."
+        required: true
+        default: "fixtures/live_pelangi_euro/Screenshot_20260926-111343.jpg,fixtures/live_pelangi_euro/Screenshot_20260926-111350.jpg,fixtures/live_pelangi_euro/Screenshot_20260926-111355.jpg,fixtures/live_pelangi_euro/Screenshot_20260926-111402.jpg,fixtures/live_pelangi_euro/Screenshot_20260926-111406.jpg,fixtures/live_pelangi_euro/Screenshot_20260926-111412.jpg"
+        type: string
+      fixture_date:
+        description: "Tanggal fixture provider: AUTO = tanggal hari ini WIB; atau YYYY-MM-DD untuk screenshot historis"
+        required: true
+        default: "AUTO"
+        type: string
+      time_window:
+        description: "Filter waktu manual"
+        required: true
+        default: "00:00-05:00"
+        type: choice
+        options:
+          - "18:00-21:00"
+          - "21:00-00:00"
+          - "00:00-05:00"
+          - "05:00-10:00"
+      minimum_probability:
+        description: "Minimum model probability"
+        required: true
+        default: "0.55"
+        type: string
+      minimum_ev:
+        description: "Minimum EV (0.02 = +2%)"
+        required: true
+        default: "0.02"
+        type: string
+      max_evidence_fixtures:
+        description: "Batas evidence live: 0 = semua fixture dalam window; angka positif = batas uji"
+        required: true
+        default: "0"
+        type: string
+      api_throttle_seconds:
+        description: "Jeda antar request API-Football; 6.2 aman untuk batas 10 request/menit"
+        required: true
+        default: "6.2"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  final-real-pipeline:
+    runs-on: ubuntu-latest
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      FOOTBALL_DATA_CSV_PATH: data/football_data.csv
+      FOOTBALL_DATABASE_PATH: data/database/football.db
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install             pillow             pytesseract             rapidfuzz             numpy             pandas             scipy             scikit-learn             pytest
+
+      - name: Install OCR engine
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          tesseract --version
+
+      - name: Validate provider credential
+        run: |
+          set -euo pipefail
+          test -n "${API_FOOTBALL_KEY:-}" || {
+            echo "ERROR: API_FOOTBALL_KEY GitHub Secret belum tersedia."
+            exit 1
+          }
+          echo "API-FOOTBALL SECRET: PRESENT"
+          echo "OPENFOOT: DISABLED IN V20.80"
+          echo "CSV FALLBACK PATH: ${FOOTBALL_DATA_CSV_PATH}"
+
+      - name: Validate and normalize screenshot input
+        env:
+          SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python v20_79_screenshot_input.py --raw "$SCREENSHOT_PATHS" --output artifacts/normalized_screenshots.txt
+
+
+      - name: Build fresh local historical database
+        run: |
+          set -euo pipefail
+          python v20_79_build_public_database.py --output data/database/football.db
+          python - <<'PY'
+          import sqlite3
+          p='data/database/football.db'
+          c=sqlite3.connect(p)
+          n=c.execute('SELECT COUNT(*) FROM matches').fetchone()[0]
+          s=c.execute('SELECT COUNT(*) FROM matches WHERE home_goals IS NOT NULL AND away_goals IS NOT NULL').fetchone()[0]
+          print('LOCAL DB MATCHES:', n)
+          print('LOCAL DB SCORED:', s)
+          assert n > 0
+          c.close()
+          PY
+
+      - name: Python syntax and import gate
+        run: |
+          set -euo pipefail
+          python -m compileall -q .
+          python - <<'PY'
+          import fast_pelangi_parser
+          import v20_78_3_live_providers
+          import v20_78_35_fixture_validation
+          import v20_78_39_provider_aware_pipeline
+          import v20_79_real_pipeline
+          print("V20.79 CORE IMPORT: PASS")
+          PY
+
+      - name: Run regression tests
+        run: |
+          set -euo pipefail
+          pytest -q test_v20_79_real_pipeline.py test_v20_80.py v20_78_39_test.py test_v20_79_local_database.py
+          echo "V20.79 BASELINE + V20.80 DATA/MODEL GATE TESTS: PASS"
+
+      - name: Run FINAL REAL pipeline
+        env:
+          SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
+          FIXTURE_DATE: ${{ inputs.fixture_date }}
+          TIME_WINDOW: ${{ inputs.time_window }}
+          MIN_PROBABILITY: ${{ inputs.minimum_probability }}
+          MIN_EV: ${{ inputs.minimum_ev }}
+          MAX_EVIDENCE_FIXTURES: ${{ inputs.max_evidence_fixtures }}
+          API_FOOTBALL_THROTTLE_SECONDS: ${{ inputs.api_throttle_seconds }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+
+          # Use the exact normalized paths produced by the validation step.
+          mapfile -t SCREENSHOTS < artifacts/normalized_screenshots.txt
+          test "${#SCREENSHOTS[@]}" -gt 0
+
+          python v20_80_real_pipeline.py \
+            --screenshot "${SCREENSHOTS[@]}" \
+            --fixture-date "$FIXTURE_DATE" \
+            --time-window "$TIME_WINDOW" \
+            --min-probability "$MIN_PROBABILITY" \
+            --min-ev "$MIN_EV" \
+            --max-evidence-fixtures "$MAX_EVIDENCE_FIXTURES" \
+            --api-throttle-seconds "$API_FOOTBALL_THROTTLE_SECONDS" \
+            --output artifacts/v20_80_final_output.json
+
+
+      - name: Validate FINAL output safety
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path("artifacts/v20_79_final_output.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+
+          assert data["engine_version"] == "V20.79"
+          assert data["source"] == "PelangiEuro"
+          assert data["time_filter_mode"] == "MANUAL"
+          assert data["market_source_locked"] is True
+          assert data["no_forced_quota"] is True
+
+          for item in data.get("candidates", []):
+              assert item["source_market_locked"] is True
+              assert item["qualified"] is True
+              assert item["fixture_id"]
+              assert item["model_probability"] >= data["thresholds"]["minimum_probability"]
+              assert item["ev"] >= data["thresholds"]["minimum_ev"]
+
+          for item in data.get("unresolved", []):
+              assert item.get("reason")
+
+          print("FINAL OUTPUT SAFETY: PASS")
+          print()
+          print("=== HASIL PER FIXTURE ===")
+          for item in data.get("fixtures", []):
+              f = item.get("fixture", {})
+              best = item.get("best_prediction")
+              name = f'{f.get("home_canonical") or f.get("home")} vs {f.get("away_canonical") or f.get("away")}'
+              if best:
+                  sig = best.get("signal", {})
+                  print({
+                      "fixture": name,
+                      "kickoff": f.get("kickoff"),
+                      "prediction": f'{best.get("market")} {best.get("selection")}',
+                      "probability": best.get("model_probability"),
+                      "ev": best.get("ev"),
+                      "signal": sig.get("label"),
+                      "qualification_status": best.get("qualification_status"),
+                      "warnings": best.get("warnings_for_user"),
+                      "historical": item.get("historical_data_status"),
+                  })
+              else:
+                  print({
+                      "fixture": name,
+                      "kickoff": f.get("kickoff"),
+                      "prediction": None,
+                      "probability": None,
+                      "ev": None,
+                      "signal": "DATA TIDAK CUKUP",
+                      "status": item.get("result_note", "HASIL TIDAK DIKETAHUI KARENA DATA TIDAK ADA"),
+                      "historical": item.get("historical_data_status"),
+                  })
+          print()
+          print("Input screenshots:", len(data["screenshots"]))
+          print("Counts:", data["counts"])
+          print("Resolved outside selected window:", data.get("resolved_outside_window", []))
+          print("V20.80 plan:", data.get("v20_80_plan"))
+          diagnostic = data.get("engine_diagnostic", {})
+          print()
+          print("=== ENGINE HEALTH ===")
+          print("Engine status:", diagnostic.get("engine_status"))
+          print("Execution healthy:", diagnostic.get("execution_healthy"))
+          print("Qualification status:", diagnostic.get("qualification_status"))
+          print("Reason codes:", diagnostic.get("reason_codes"))
+          if diagnostic.get("engine_status") == "HEALTHY_NO_QUALIFIED_MARKETS":
+              print("INFO: ENGINE SEHAT — 0 qualified karena tidak ada market yang memenuhi threshold.")
+          elif diagnostic.get("engine_status") == "PIPELINE_REQUIRES_DIAGNOSTIC":
+              print("WARNING: PIPELINE MEMERLUKAN DIAGNOSTIC — jangan menganggap 0 qualified sebagai masalah threshold.")
+          print("5-leg candidates:", len(data["candidate_parlay_5"]))
+          print("7-leg candidates:", len(data["candidate_parlay_7"]))
+          print()
+          print("PROBABILITY REPAIR DIAGNOSTICS:")
+          for item in data.get("unresolved", []):
+              if item.get("reason") == "PROBABILITY_INSUFFICIENT":
+                  fixture = item.get("fixture", {})
+                  diag = item.get("probability_diagnostics", {})
+                  print({
+                      "fixture": f'{fixture.get("home_canonical") or fixture.get("home")} vs {fixture.get("away_canonical") or fixture.get("away")}',
+                      "kickoff": fixture.get("kickoff"),
+                      "missing_expected_goals_sides": diag.get("missing_expected_goals_sides"),
+                      "evidence_keys": diag.get("evidence_keys"),
+                      "evidence_sources": diag.get("evidence_sources"),
+                      "provider_collector_errors": diag.get("provider_collector_errors"),
+                      "visible_market_count": diag.get("visible_market_count"),
+                  })
+          PY
+
+      - name: Publish final artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v20-79-final-real-pipeline
+          path: artifacts/v20_79_final_output.json
+
+      - name: FINAL status
+        run: |
+          set -euo pipefail
+          echo
+          echo "======================================================"
+          echo " V20.79 FINAL REAL PIPELINE: PASS"
+          echo "======================================================"
+          echo
+          echo "V20.80"
+          echo "  -> DATA PREPARATION"
+          echo "  -> EXTERNAL MODEL AUDIT"
+          echo "  -> ADAPTIVE ENSEMBLE (AUDIT-GATED)"
+          echo
+          echo "SCREENSHOT"
+          echo "  -> OCR / PARSER"
+          echo "  -> MANUAL TIME FILTER"
+          echo "  -> REAL FIXTURE RESOLUTION"
+          echo "  -> REAL PROVIDER EVIDENCE"
+          echo "  -> REAL PROBABILITY"
+          echo "  -> EXACT SOURCE MARKET/LINE/ODDS"
+          echo "  -> ASIAN-LINE EV"
+          echo "  -> QUALIFICATION"
+          echo "  -> 5/7 CANDIDATE PARLAY"
+          echo
+          echo "No forced quota."
+          echo "No invented market."
+          echo "No invented fixture."
+          echo "No hard-coded production probability."
+          echo "======================================================"
