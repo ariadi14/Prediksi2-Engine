@@ -158,6 +158,46 @@ def resolve_fixture_search_date(value: str) -> str:
     return value
 
 
+def diagnose_pipeline_health(counts: Dict[str, int], unresolved: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Classify pipeline execution separately from market qualification."""
+    parsed = int(counts.get("parsed_fixtures", 0))
+    resolved = int(counts.get("provider_resolved_fixtures", 0))
+    window = int(counts.get("time_window_matches", 0))
+    enriched = int(counts.get("evidence_enriched_fixtures", 0))
+    calculated = int(counts.get("probability_calculated_fixtures", 0))
+    qualified = int(counts.get("qualified_markets", 0))
+    reasons = []
+    if parsed > 0 and resolved == 0:
+        reasons.append("NO_FIXTURE_RESOLVED")
+    elif window > 0 and enriched == 0:
+        reasons.append("NO_EVIDENCE_ENRICHED")
+    elif window > 0 and enriched > 0 and calculated == 0:
+        reasons.append("NO_PROBABILITY_CALCULATED")
+    elif window > 0 and calculated == window and qualified == 0:
+        reasons.append("NO_MARKET_MEETS_THRESHOLD")
+    execution_healthy = window == 0 or (enriched == window and calculated == window)
+    if window > 0 and calculated < window:
+        execution_healthy = False
+    if window == 0:
+        status = "NO_FIXTURES_IN_SELECTED_WINDOW"
+    elif execution_healthy and calculated == window:
+        status = "HEALTHY_NO_QUALIFIED_MARKETS" if qualified == 0 else "HEALTHY"
+    else:
+        status = "PIPELINE_REQUIRES_DIAGNOSTIC"
+    return {
+        "engine_status": status,
+        "execution_healthy": execution_healthy,
+        "qualification_status": (
+            "NO_MARKET_MEETS_THRESHOLD" if window > 0 and calculated == window and qualified == 0
+            else ("MARKETS_QUALIFIED" if qualified > 0 else "NOT_REACHED")
+        ),
+        "reason_codes": reasons,
+        "thresholds_are_business_rules": True,
+        "message": (
+            "Engine berhasil menghitung semua fixture dalam window; 0 qualified berarti tidak ada market yang memenuhi threshold."
+            if status == "HEALTHY_NO_QUALIFIED_MARKETS" else None
+        ),
+    }
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--screenshot", nargs="+", required=True, help="One or more PelangiEuro screenshot paths")
@@ -503,6 +543,21 @@ def main() -> int:
             break
     selected_5 = selected_7[:5]
 
+    counts = {
+        "input_screenshots": len(screenshots),
+        "parsed_fixtures": len(fixtures),
+        "provider_resolved_fixtures": provider_resolved,
+        "time_window_matches": time_window_matches,
+        "evidence_enriched_fixtures": evidence_enriched,
+        "probability_calculated_fixtures": probability_calculated,
+        "resolved_fixtures": len(results),
+        "unresolved_fixtures": len(unresolved),
+        "qualified_markets": len(candidates),
+        "fixtures_with_best_prediction": sum(1 for r in results if r.get("best_prediction")),
+        "fixtures_without_historical_data": sum(1 for r in results if r.get("historical_data_available") is False),
+    }
+    engine_diagnostic = diagnose_pipeline_health(counts, unresolved)
+
     output = {
         "engine_version": "V20.79",
         "baseline": "V20.78.52",
@@ -521,19 +576,8 @@ def main() -> int:
             "minimum_probability": args.min_probability,
             "minimum_ev": args.min_ev,
         },
-        "counts": {
-            "input_screenshots": len(screenshots),
-            "parsed_fixtures": len(fixtures),
-            "provider_resolved_fixtures": provider_resolved,
-            "time_window_matches": time_window_matches,
-            "evidence_enriched_fixtures": evidence_enriched,
-            "probability_calculated_fixtures": probability_calculated,
-            "resolved_fixtures": len(results),
-            "unresolved_fixtures": len(unresolved),
-            "qualified_markets": len(candidates),
-            "fixtures_with_best_prediction": sum(1 for r in results if r.get("best_prediction")),
-            "fixtures_without_historical_data": sum(1 for r in results if r.get("historical_data_available") is False),
-        },
+        "counts": counts,
+        "engine_diagnostic": engine_diagnostic,
         "fixtures": results,
         "unresolved": unresolved,
         "candidates": candidates,
@@ -548,6 +592,7 @@ def main() -> int:
 
     print(json.dumps({
         "status": output["status"],
+        "engine_diagnostic": output["engine_diagnostic"],
         "counts": output["counts"],
         "candidate_parlay_5_legs": len(selected_5),
         "candidate_parlay_7_legs": len(selected_7),
