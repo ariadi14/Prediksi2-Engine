@@ -276,6 +276,31 @@ class APIFootballProvider:
     name="api-football"
     def __init__(self, api_key:Optional[str]=None):
         self.http=JSONHTTP("https://v3.football.api-sports.io",api_key,"x-apisports-key")
+        # Optional real provider snapshot. Read-only cached provider data can
+        # be used to test fixture resolution without spending another API call.
+        self.fixture_snapshot_path = os.getenv(
+            "API_FOOTBALL_FIXTURE_SNAPSHOT_PATH",
+            "data/provider_snapshots/api_football_fixtures.json",
+        )
+        self._fixture_snapshot = self._load_fixture_snapshot()
+
+    def _load_fixture_snapshot(self):
+        path = str(self.fixture_snapshot_path or "").strip()
+        if not path or not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            if isinstance(payload, dict):
+                if isinstance(payload.get("fixtures_by_date"), dict):
+                    return payload["fixtures_by_date"]
+                if isinstance(payload.get("response"), list):
+                    date = payload.get("date") or payload.get("fixture_date")
+                    return {str(date): payload["response"]} if date else {}
+                return {str(k): v for k, v in payload.items() if isinstance(v, list)}
+            return {}
+        except Exception:
+            return {}
     def _first(self,d):
         r=d.get('response',[]) if isinstance(d,dict) else []
         return r[0] if r else None
@@ -300,6 +325,30 @@ class APIFootballProvider:
             cache = {}
             self._fixture_date_cache = cache
         if date in cache: return cache[date]
+        snapshot_rows = self._fixture_snapshot.get(str(date))
+        if isinstance(snapshot_rows, list):
+            cache[date] = snapshot_rows
+            self._last_fixture_lookup = {
+                "date": date,
+                "rows": len(snapshot_rows),
+                "pages": 0,
+                "error": None,
+                "source": "PROVIDER_SNAPSHOT",
+                "api_quota_exhausted": False,
+                "rate_limit_diagnostics": {},
+            }
+            raw_by_id = {}
+            for row in snapshot_rows:
+                try:
+                    rid = (row.get("fixture") or {}).get("id")
+                    if rid is not None:
+                        raw_by_id[int(rid)] = row
+                except Exception:
+                    continue
+            if raw_by_id:
+                self._fixture_raw_by_id = getattr(self, "_fixture_raw_by_id", {})
+                self._fixture_raw_by_id.update(raw_by_id)
+            return snapshot_rows
         rows_all = []
         try:
             page = 1
