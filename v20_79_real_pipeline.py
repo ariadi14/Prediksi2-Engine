@@ -354,19 +354,39 @@ def main() -> int:
                     ("away", prediction.get("away_xg")),
                 ) if value is None
             ]
+            diagnostics = {
+                "missing_expected_goals_sides": missing_expected_goals,
+                "evidence_keys": sorted(ev_payload.keys()),
+                "evidence_sources": ev_payload.get("evidence_sources", []),
+                "evidence_conflicts": ev_payload.get("evidence_conflicts", []),
+                "provider_collector_errors": ev_payload.get("collector_errors", []),
+                "visible_market_count": len(visible),
+                "visible_markets": visible,
+            }
+            results.append({
+                "fixture": resolved,
+                "validation": validation,
+                "evidence_status": provider_evidence.get("status"),
+                "prediction_status": "INSUFFICIENT_DATA",
+                "historical_data_available": historical_available,
+                "historical_data_status": "AVAILABLE" if historical_available else ("PARTIAL" if historical_partial else "NOT_AVAILABLE"),
+                "model": {
+                    "home_xg": prediction.get("home_xg"),
+                    "away_xg": prediction.get("away_xg"),
+                    "calibration": prediction.get("calibration"),
+                    "warnings": ["HISTORICAL_DATA_NOT_AVAILABLE", "PROBABILITY_INSUFFICIENT"],
+                },
+                "markets": [],
+                "best_prediction": None,
+                "result_note": "HASIL TIDAK DIKETAHUI KARENA DATA TIDAK ADA",
+                "probability_diagnostics": diagnostics,
+            })
             unresolved.append({
                 "fixture": resolved,
                 "reason": "PROBABILITY_INSUFFICIENT",
                 "prediction": prediction,
-                "probability_diagnostics": {
-                    "missing_expected_goals_sides": missing_expected_goals,
-                    "evidence_keys": sorted(ev_payload.keys()),
-                    "evidence_sources": ev_payload.get("evidence_sources", []),
-                    "evidence_conflicts": ev_payload.get("evidence_conflicts", []),
-                    "provider_collector_errors": ev_payload.get("collector_errors", []),
-                    "visible_market_count": len(visible),
-                    "visible_markets": visible,
-                },
+                "probability_diagnostics": diagnostics,
+                "historical_data_available": historical_available,
             })
             continue
         probability_calculated += 1
