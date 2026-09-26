@@ -87,35 +87,14 @@ jobs:
           echo "OPENFOOT: DISABLED IN V20.79"
           echo "CSV FALLBACK PATH: ${FOOTBALL_DATA_CSV_PATH}"
 
-      - name: Validate batch screenshot input
+      - name: Validate and normalize screenshot input
         env:
           SCREENSHOT_PATHS: ${{ inputs.screenshot_paths }}
         run: |
           set -euo pipefail
-          python - "$SCREENSHOT_PATHS" <<'PY'
-          import sys
-          from PIL import Image
+          mkdir -p artifacts
+          python v20_79_screenshot_input.py --raw "$SCREENSHOT_PATHS" --output artifacts/normalized_screenshots.txt
 
-          raw = sys.argv[1].strip()
-          # Toleransi terhadap input yang ditempel bersama label field.
-          if ":" in raw:
-              prefix, candidate = raw.split(":", 1)
-              if prefix.strip().lower() in {"screenshot", "screenshot paths", "screenshot_path", "screenshot_paths"}:
-                  raw = candidate.strip()
-          paths = [x.strip().strip(chr(34)).strip(chr(39)) for x in raw.split(",") if x.strip()]
-          if not paths:
-              raise SystemExit("ERROR: screenshot_paths kosong.")
-
-          for path in paths:
-              image = Image.open(path)
-              print("SCREENSHOT:", path)
-              print("  FORMAT:", image.format)
-              print("  SIZE:", image.size)
-              print("  MODE:", image.mode)
-              assert image.width > 0 and image.height > 0
-
-          print(f"BATCH SCREENSHOT VALIDATION: PASS ({len(paths)} files)")
-          PY
 
       - name: Build fresh local historical database
         run: |
@@ -166,19 +145,20 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
 
-          # Toleransi terhadap input yang ditempel bersama label field.
-          SCREENSHOT_PATHS="$(printf '%s' "$SCREENSHOT_PATHS" | sed -E 's/^[[:space:]]*(Screenshot|Screenshot paths|screenshot_path|screenshot_paths)[[:space:]]*:[[:space:]]*//I')"
-          IFS=',' read -r -a SCREENSHOTS <<< "$SCREENSHOT_PATHS"
+          # Use the exact normalized paths produced by the validation step.
+          mapfile -t SCREENSHOTS < artifacts/normalized_screenshots.txt
           test "${#SCREENSHOTS[@]}" -gt 0
 
-          SCREENSHOT_ARGS=()
-          for screenshot in "${SCREENSHOTS[@]}"; do
-              screenshot="$(echo "$screenshot" | xargs)"
-              test -n "$screenshot"
-              SCREENSHOT_ARGS+=( "$screenshot" )
-          done
+          python v20_79_real_pipeline.py \
+            --screenshot "${SCREENSHOTS[@]}" \
+            --fixture-date "$FIXTURE_DATE" \
+            --time-window "$TIME_WINDOW" \
+            --min-probability "$MIN_PROBABILITY" \
+            --min-ev "$MIN_EV" \
+            --max-evidence-fixtures "$MAX_EVIDENCE_FIXTURES" \
+            --api-throttle-seconds "$API_FOOTBALL_THROTTLE_SECONDS" \
+            --output artifacts/v20_79_final_output.json
 
-          python v20_79_real_pipeline.py             --screenshot "${SCREENSHOT_ARGS[@]}"             --fixture-date "$FIXTURE_DATE"             --time-window "$TIME_WINDOW"             --min-probability "$MIN_PROBABILITY"             --min-ev "$MIN_EV"             --max-evidence-fixtures "$MAX_EVIDENCE_FIXTURES"             --api-throttle-seconds "$API_FOOTBALL_THROTTLE_SECONDS"             --output artifacts/v20_79_final_output.json
 
       - name: Validate FINAL output safety
         run: |
