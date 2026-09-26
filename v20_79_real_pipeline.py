@@ -385,12 +385,27 @@ def main() -> int:
                 notes.append("EV_BELOW_THRESHOLD")
             if ev is not None and ev < 0:
                 notes.append("NEGATIVE_EV")
-            best_prediction["recommendation_note"] = (
-                "USER_DECIDES_FINAL_SELECTION"
-                if notes else
-                "MEETS_CONFIGURED_PROBABILITY_AND_EV_THRESHOLDS"
-            )
+            if notes:
+                if prob < args.min_probability and ev is not None and ev < args.min_ev:
+                    recommendation = "JANGAN PILIH PERTANDINGAN INI"
+                elif prob < args.min_probability:
+                    recommendation = "SEBAIKNYA JANGAN PILIH PERTANDINGAN INI"
+                elif ev is not None and ev < args.min_ev:
+                    recommendation = "SEBAIKNYA JANGAN PILIH PERTANDINGAN INI"
+                else:
+                    recommendation = "USER_MEMBUAT_KEPUTUSAN_AKHIR"
+            else:
+                recommendation = "MEETS_CONFIGURED_PROBABILITY_AND_EV_THRESHOLDS"
+
+            best_prediction["recommendation_note"] = recommendation
             best_prediction["warnings_for_user"] = notes
+            best_prediction["decision_owner"] = "USER"
+            best_prediction["recommendation_basis"] = {
+                "probability_threshold": args.min_probability,
+                "ev_threshold": args.min_ev,
+                "model_probability": prob,
+                "ev": ev,
+            }
 
         results.append({
             "fixture": resolved,
