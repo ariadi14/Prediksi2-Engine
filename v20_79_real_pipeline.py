@@ -393,9 +393,9 @@ def main() -> int:
                 elif ev is not None and ev < args.min_ev:
                     recommendation = "SEBAIKNYA JANGAN PILIH PERTANDINGAN INI"
                 else:
-                    recommendation = "USER_MEMBUAT_KEPUTUSAN_AKHIR"
+                    recommendation = "KEPUTUSAN AKHIR DI TANGAN PENGGUNA"
             else:
-                recommendation = "MEETS_CONFIGURED_PROBABILITY_AND_EV_THRESHOLDS"
+                recommendation = "PROBABILITAS DAN EV MEMENUHI BATAS YANG DITETAPKAN"
 
             best_prediction["recommendation_note"] = recommendation
             best_prediction["warnings_for_user"] = notes
