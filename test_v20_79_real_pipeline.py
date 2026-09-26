@@ -132,3 +132,15 @@ def test_probability_not_calculated_is_not_classified_as_healthy():
     assert diagnostic["engine_status"] == "PIPELINE_REQUIRES_DIAGNOSTIC"
     assert diagnostic["execution_healthy"] is False
     assert diagnostic["qualification_status"] == "NOT_REACHED"
+
+
+def test_screenshot_input_normalization_accepts_field_label():
+    from v20_79_screenshot_input import normalize_raw
+    assert normalize_raw("Screenshot paths: a.jpg,b.jpg") == ["a.jpg", "b.jpg"]
+
+
+def test_screenshot_input_resolution_never_invents_missing_filename():
+    from v20_79_screenshot_input import resolve_one
+    import pytest
+    with pytest.raises(SystemExit, match="SCREENSHOT_NOT_FOUND"):
+        resolve_one("definitely_missing_screenshot_20260926.jpg")
