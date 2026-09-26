@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from fast_pelangi_parser import FastPelangiParser
 from v20_78_39_provider_aware_pipeline import ProviderAwarePipeline
-from v20_78_probability_engine import AdaptiveProbabilityEngine, score_matrix
+from v20_78_probability_engine import score_matrix
 
 
 def settlement_return(score_home: int, score_away: int, line: float, side: str, odds: float) -> float:
