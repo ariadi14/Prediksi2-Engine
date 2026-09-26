@@ -617,7 +617,11 @@ def flatten_provider_payload(raw:Dict[str,Any])->Dict[str,Any]:
     direct_keys=("home_xg","away_xg","home_attack","away_attack","home_defence","away_defence",
                  "form_home_prob","home_away_prob","h2h_home_prob","lineup_home_prob",
                  "injury_home_prob","suspension_home_prob","tactical_home_prob","elo_home_prob",
-                 "ml_home_prob","home_advantage","dixon_coles_rho","evidence_quality",\n                 "home_goals_for_home_avg","home_goals_against_home_avg",\n                 "away_goals_for_away_avg","away_goals_against_away_avg",\n                 "home_recent_goals_for_avg","home_recent_goals_against_avg",\n                 "away_recent_goals_for_avg","away_recent_goals_against_avg")
+                  "ml_home_prob","home_advantage","dixon_coles_rho","evidence_quality",
+                  "home_goals_for_home_avg","home_goals_against_home_avg",
+                  "away_goals_for_away_avg","away_goals_against_away_avg",
+                  "home_recent_goals_for_avg","home_recent_goals_against_avg",
+                  "away_recent_goals_for_avg","away_recent_goals_against_avg")
     for k in direct_keys:
         if raw.get(k) is not None:
             try: out[k]=float(raw[k])
