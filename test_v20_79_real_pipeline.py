@@ -99,3 +99,36 @@ def test_parser_market_columns_scale_with_screenshot_width():
     assert wide["hdp"][0] == 915.0
     assert wide["hdp"][1] == 1035.0
 
+
+
+def test_zero_qualified_markets_is_healthy_when_all_window_probabilities_calculated():
+    from v20_79_real_pipeline import diagnose_pipeline_health
+    counts = {
+        "parsed_fixtures": 3,
+        "provider_resolved_fixtures": 3,
+        "time_window_matches": 3,
+        "evidence_enriched_fixtures": 3,
+        "probability_calculated_fixtures": 3,
+        "qualified_markets": 0,
+    }
+    diagnostic = diagnose_pipeline_health(counts, [])
+    assert diagnostic["engine_status"] == "HEALTHY_NO_QUALIFIED_MARKETS"
+    assert diagnostic["execution_healthy"] is True
+    assert diagnostic["qualification_status"] == "NO_MARKET_MEETS_THRESHOLD"
+    assert diagnostic["reason_codes"] == ["NO_MARKET_MEETS_THRESHOLD"]
+
+
+def test_probability_not_calculated_is_not_classified_as_healthy():
+    from v20_79_real_pipeline import diagnose_pipeline_health
+    counts = {
+        "parsed_fixtures": 3,
+        "provider_resolved_fixtures": 3,
+        "time_window_matches": 3,
+        "evidence_enriched_fixtures": 3,
+        "probability_calculated_fixtures": 0,
+        "qualified_markets": 0,
+    }
+    diagnostic = diagnose_pipeline_health(counts, [])
+    assert diagnostic["engine_status"] == "PIPELINE_REQUIRES_DIAGNOSTIC"
+    assert diagnostic["execution_healthy"] is False
+    assert diagnostic["qualification_status"] == "NOT_REACHED"
