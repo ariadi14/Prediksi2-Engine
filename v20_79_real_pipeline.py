@@ -256,6 +256,7 @@ def main() -> int:
             # today's Jakarta date; historical runs can pass an explicit date.
             if not fixture.get("match_date"):
                 fixture["match_date"] = fixture_search_date
+                fixture["match_date_inferred"] = True
             fixtures.append(fixture)
 
     if not fixtures:
