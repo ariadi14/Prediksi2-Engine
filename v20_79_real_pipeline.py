@@ -476,17 +476,7 @@ def main() -> int:
                 notes.append("EV_BELOW_THRESHOLD")
             if ev is not None and ev < 0:
                 notes.append("NEGATIVE_EV")
-            if notes:
-                if prob < args.min_probability and ev is not None and ev < args.min_ev:
-                    recommendation = "JANGAN PILIH PERTANDINGAN INI"
-                elif prob < args.min_probability:
-                    recommendation = "SEBAIKNYA JANGAN PILIH PERTANDINGAN INI"
-                elif ev is not None and ev < args.min_ev:
-                    recommendation = "SEBAIKNYA JANGAN PILIH PERTANDINGAN INI"
-                else:
-                    recommendation = "KEPUTUSAN AKHIR DI TANGAN PENGGUNA"
-            else:
-                recommendation = "PROBABILITAS DAN EV MEMENUHI BATAS YANG DITETAPKAN"
+            qualification_status = "QUALIFIED" if not notes else "NOT_QUALIFIED"
 
             # Signal is attached only to the single best prediction for this
             # fixture. Other visible markets remain analysis-only.
@@ -502,7 +492,7 @@ def main() -> int:
                 "label": signal_label,
                 "basis": "BEST_VISIBLE_MARKET_PROBABILITY_AND_EV",
             }
-            best_prediction["recommendation_note"] = recommendation
+            best_prediction["qualification_status"] = qualification_status
             best_prediction["warnings_for_user"] = notes
             best_prediction["decision_owner"] = "USER"
             best_prediction["recommendation_basis"] = {
