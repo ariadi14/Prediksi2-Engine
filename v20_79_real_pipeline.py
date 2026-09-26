@@ -341,6 +341,11 @@ def main() -> int:
         probability_calculated += 1
 
         evaluated = evaluate_markets(prediction, visible)
+
+        # V20.79 prediction contract:
+        # Always return the best available prediction from the markets/lines
+        # actually visible in the screenshot. Qualification is a separate
+        # downstream decision and must never suppress the model prediction.
         for candidate in evaluated:
             candidate.update({
                 "source_screenshot": resolved.get("source_screenshot") or fixture.get("source_screenshot"),
@@ -358,6 +363,35 @@ def main() -> int:
                 and candidate["ev"] >= args.min_ev
             )
 
+        best_prediction = None
+        if evaluated:
+            # Primary ranking is model probability. EV is reported separately
+            # and is never allowed to replace the model's highest-probability
+            # selection.
+            best_prediction = max(
+                evaluated,
+                key=lambda x: (
+                    float(x.get("model_probability", -1)),
+                    float(x.get("ev", -999)) if x.get("ev") is not None else -999,
+                ),
+            ).copy()
+
+            prob = float(best_prediction.get("model_probability", 0))
+            ev = best_prediction.get("ev")
+            notes = []
+            if prob < args.min_probability:
+                notes.append("MODEL_PROBABILITY_BELOW_THRESHOLD")
+            if ev is not None and ev < args.min_ev:
+                notes.append("EV_BELOW_THRESHOLD")
+            if ev is not None and ev < 0:
+                notes.append("NEGATIVE_EV")
+            best_prediction["recommendation_note"] = (
+                "USER_DECIDES_FINAL_SELECTION"
+                if notes else
+                "MEETS_CONFIGURED_PROBABILITY_AND_EV_THRESHOLDS"
+            )
+            best_prediction["warnings_for_user"] = notes
+
         results.append({
             "fixture": resolved,
             "validation": validation,
@@ -370,6 +404,7 @@ def main() -> int:
                 "warnings": prediction.get("warnings"),
             },
             "markets": evaluated,
+            "best_prediction": best_prediction,
         })
 
     candidates = [
