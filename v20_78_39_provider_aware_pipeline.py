@@ -3,6 +3,7 @@ No fabricated live data. A deterministic mock provider is available only for int
 """
 from __future__ import annotations
 from typing import Any, Dict
+from datetime import datetime, timedelta
 from rapidfuzz import fuzz
 from v20_78_34_provider_connection import ProviderConnection
 from v20_78_35_fixture_validation import validate_fixture
@@ -95,6 +96,18 @@ class ProviderAwarePipeline:
                 if best.get('provider_ids'):
                     out[f'{side}_provider_ids']=best['provider_ids']
         return out
+
+    @staticmethod
+    def _fixture_date_candidates(fixture: Dict[str, Any]):
+        """Return safe date probes for screenshots whose date was unreadable."""
+        base = str(fixture.get('match_date') or '').strip()
+        if not base or not fixture.get('match_date_inferred'):
+            return [base]
+        try:
+            d = datetime.strptime(base, '%Y-%m-%d').date()
+        except ValueError:
+            return [base]
+        return [(d + timedelta(days=delta)).isoformat() for delta in (0, 1, 2, -1)]
 
     def resolve_fixture(self, fixture: Dict[str,Any]):
         # First try the provider's daily fixture index using the screenshot
