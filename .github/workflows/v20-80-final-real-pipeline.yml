@@ -179,6 +179,10 @@ jobs:
           assert data["time_filter_mode"] == "MANUAL"
           assert data["market_source_locked"] is True
           assert data["no_forced_quota"] is True
+          assert data["baseline"] == "V20.79"
+          assert data["v20_80_plan"]["data_preparation"] is True
+          assert data["v20_80_plan"]["external_model_audit"] is True
+          assert data["v20_80_plan"]["adaptive_ensemble"] is True
 
           for item in data.get("candidates", []):
               assert item["source_market_locked"] is True
