@@ -43,6 +43,11 @@ on:
         required: true
         default: "6.2"
         type: string
+      fixture_snapshot_path:
+        description: "Opsional: snapshot fixture provider nyata; gunakan default bila file tersedia"
+        required: true
+        default: "data/provider_snapshots/api_football_fixtures.json"
+        type: string
 
 permissions:
   contents: read
@@ -144,6 +149,7 @@ jobs:
           MIN_EV: ${{ inputs.minimum_ev }}
           MAX_EVIDENCE_FIXTURES: ${{ inputs.max_evidence_fixtures }}
           API_FOOTBALL_THROTTLE_SECONDS: ${{ inputs.api_throttle_seconds }}
+          API_FOOTBALL_FIXTURE_SNAPSHOT_PATH: ${{ inputs.fixture_snapshot_path }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
