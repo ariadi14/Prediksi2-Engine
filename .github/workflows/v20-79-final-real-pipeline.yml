@@ -223,7 +223,8 @@ jobs:
                       "probability": best.get("model_probability"),
                       "ev": best.get("ev"),
                       "signal": sig.get("label"),
-                      "recommendation": best.get("recommendation_note"),
+                      "qualification_status": best.get("qualification_status"),
+                      "warnings": best.get("warnings_for_user"),
                       "historical": item.get("historical_data_status"),
                   })
               else:
@@ -234,7 +235,7 @@ jobs:
                       "probability": None,
                       "ev": None,
                       "signal": "DATA TIDAK CUKUP",
-                      "recommendation": item.get("result_note", "HASIL TIDAK DIKETAHUI KARENA DATA TIDAK ADA"),
+                      "status": item.get("result_note", "HASIL TIDAK DIKETAHUI KARENA DATA TIDAK ADA"),
                       "historical": item.get("historical_data_status"),
                   })
           print()
