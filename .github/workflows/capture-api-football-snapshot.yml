@@ -1,0 +1,144 @@
+name: Capture API-Football Fixture Snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixture_date:
+        description: "Tanggal fixture API-Football (YYYY-MM-DD)"
+        required: true
+        default: "2026-09-26"
+        type: string
+      snapshot_path:
+        description: "Path snapshot JSON"
+        required: true
+        default: "data/provider_snapshots/api_football_fixtures.json"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      FIXTURE_DATE: ${{ inputs.fixture_date }}
+      SNAPSHOT_PATH: ${{ inputs.snapshot_path }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate API credential
+        run: |
+          set -euo pipefail
+          test -n "${API_FOOTBALL_KEY:-}" || {
+            echo "ERROR: API_FOOTBALL_KEY GitHub Secret belum tersedia."
+            exit 1
+          }
+
+      - name: Capture real API-Football fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$SNAPSHOT_PATH")"
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          key = os.environ["API_FOOTBALL_KEY"]
+          date = os.environ["FIXTURE_DATE"]
+          path = Path(os.environ["SNAPSHOT_PATH"])
+
+          url = "https://v3.football.api-sports.io/fixtures?" + urllib.parse.urlencode({"date": date})
+          req = urllib.request.Request(
+              url,
+              headers={
+                  "x-apisports-key": key,
+                  "User-Agent": "Prediksi2-Engine-snapshot-capture",
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  payload = json.load(response)
+          except Exception as exc:
+              print(f"ERROR: API-Football request failed: {exc}")
+              sys.exit(1)
+
+          errors = payload.get("errors")
+          if errors:
+              print("ERROR: API-Football returned errors:")
+              print(json.dumps(errors, ensure_ascii=False, indent=2))
+              sys.exit(1)
+
+          rows = payload.get("response")
+          if not isinstance(rows, list):
+              print("ERROR: API-Football response field is not a list.")
+              sys.exit(1)
+
+          snapshot = {"fixtures_by_date": {date: rows}}
+          path.write_text(
+              json.dumps(snapshot, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+
+          print(f"SNAPSHOT DATE: {date}")
+          print(f"REAL FIXTURES CAPTURED: {len(rows)}")
+          print(f"SNAPSHOT PATH: {path}")
+          print("SOURCE: API-Football")
+          PY
+
+      - name: Validate snapshot integrity
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["SNAPSHOT_PATH"])
+          date = os.environ["FIXTURE_DATE"]
+          data = json.loads(path.read_text(encoding="utf-8"))
+
+          rows = data["fixtures_by_date"][date]
+          assert isinstance(rows, list)
+
+          ids = []
+          for row in rows:
+              fixture = row.get("fixture") or {}
+              teams = row.get("teams") or {}
+              assert fixture.get("id") is not None
+              assert fixture.get("date")
+              assert (teams.get("home") or {}).get("name")
+              assert (teams.get("away") or {}).get("name")
+              ids.append(fixture["id"])
+
+          assert len(ids) == len(set(ids)), "Duplicate fixture IDs detected"
+
+          print(f"SNAPSHOT VALID: {len(rows)} real fixtures")
+          print(f"DATE: {date}")
+          PY
+
+      - name: Commit snapshot to repository
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$SNAPSHOT_PATH"
+          if git diff --cached --quiet; then
+            echo "SNAPSHOT: NO CHANGES"
+          else
+            git commit -m "data: capture API-Football fixture snapshot"
+            git push
+            echo "SNAPSHOT: COMMITTED"
+          fi
+
+      - name: Upload snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-football-fixture-snapshot
+          path: ${{ inputs.snapshot_path }}
